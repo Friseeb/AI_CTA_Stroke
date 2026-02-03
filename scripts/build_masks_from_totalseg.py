@@ -10,9 +10,10 @@ Usage:
 
 Notes:
 - Expects per-structure NIfTI files produced by TotalSegmentator (default behavior).
-- Bone mask combines skull, vertebrae, ribs, sternum (ignores missing files).
+- Bone mask combines skull and cervical vertebrae (C1-C7) for head/neck CTA only.
+  - Ignores thoracic, lumbar, and sacral vertebrae (outside field of view).
 - Vessel mask combines available vascular structures (keeps vessels; does not subtract bones).
-- If a structure file is missing, it is skipped; the script remains robust.
+- If a structure file is missing, it is skipped; the script remains robust and logs found/missing structures.
 """
 
 import argparse
@@ -23,10 +24,13 @@ import nibabel as nib
 
 BONE_STRUCTURES = [
     "skull",
-    "vertebrae",
-    "rib_left",
-    "rib_right",
-    "sternum",
+    "vertebrae_C1.nii.gz",  # Cervical vertebrae only (head/neck CTA)
+    "vertebrae_C2.nii.gz",
+    "vertebrae_C3.nii.gz",
+    "vertebrae_C4.nii.gz",
+    "vertebrae_C5.nii.gz",
+    "vertebrae_C6.nii.gz",
+    "vertebrae_C7.nii.gz",
 ]
 
 VESSEL_STRUCTURES = [
@@ -53,29 +57,68 @@ VESSEL_STRUCTURES = [
 
 
 def load_structure_mask(base_dir: Path, name: str, shape_ref):
-    path = base_dir / f"{name}.nii.gz"
-    if not path.exists():
-        return None
-    img = nib.load(str(path))
-    data = img.get_fdata() > 0
-    if shape_ref is not None and data.shape != shape_ref:
-        raise ValueError(f"Shape mismatch for {name}: {data.shape} vs {shape_ref}")
-    return data, img.affine, img.header
+    """Load a structure mask, supporting glob patterns and .nii.gz extension."""
+    import glob
+    
+    # Check if it's a glob pattern
+    if '*' in name:
+        # Find all matching files
+        matches = list(base_dir.glob(name))
+        if not matches:
+            return None
+        # Combine all matching files
+        combined_data = None
+        affine, header = None, None
+        for path in sorted(matches):  # Sort for consistent ordering
+            img = nib.load(str(path))
+            data = img.get_fdata() > 0
+            if shape_ref is not None and data.shape != shape_ref:
+                raise ValueError(f"Shape mismatch for {path.name}: {data.shape} vs {shape_ref}")
+            if combined_data is None:
+                combined_data = data.astype(np.uint8)
+                affine, header = img.affine, img.header
+            else:
+                combined_data |= data
+        return combined_data, affine, header
+    else:
+        # Single file - try with .nii.gz if no extension provided
+        if not name.endswith('.nii.gz'):
+            path = base_dir / f"{name}.nii.gz"
+        else:
+            path = base_dir / name
+        if not path.exists():
+            return None
+        img = nib.load(str(path))
+        data = img.get_fdata() > 0
+        if shape_ref is not None and data.shape != shape_ref:
+            raise ValueError(f"Shape mismatch for {path.name}: {data.shape} vs {shape_ref}")
+        return data, img.affine, img.header
 
 
 def combine_masks(base_dir: Path, structures):
     combined = None
     affine = None
     header = None
+    found_structures = []
+    missing_structures = []
+    
     for name in structures:
         loaded = load_structure_mask(base_dir, name, combined.shape if combined is not None else None)
         if loaded is None:
+            missing_structures.append(name)
             continue
+        found_structures.append(name)
         data, affine, header = loaded if affine is None else (loaded[0], affine, header)
         if combined is None:
             combined = loaded[0].astype(np.uint8)
         else:
             combined |= loaded[0]
+    
+    if found_structures:
+        print(f"  ✓ Found structures: {', '.join(found_structures)}")
+    if missing_structures:
+        print(f"  ⚠ Missing structures (skipped): {', '.join(missing_structures)}")
+    
     return combined, affine, header
 
 

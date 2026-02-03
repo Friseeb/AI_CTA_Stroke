@@ -92,7 +92,8 @@ results = pipeline.run(
     min_component_size=50,         # Stage 1
     step_size=0.1,                 # Stage 4
     max_iterations=5000,           # Stage 4
-    contact_distance_threshold=1.0 # Stage 6
+    contact_distance_threshold=1.0, # Stage 6
+    save_label_map=True,            # Optional: labeled segmentation map
 )
 
 # Print summary
@@ -176,6 +177,11 @@ with open('centerline_nodes.json') as f:
 with open('centerline_edges.json') as f:
     edges = json.load(f)
 ```
+
+### Segmentation Label Map (Optional)
+If `save_label_map=True` is passed to `pipeline.run`, a labeled segmentation is saved:
+- `segmentation_labels.nii.gz` (0 = background, 1..N = connected components)
+- Source can be controlled via `label_map_source='stage1'` (default) or `'input'`.
 
 ## Parameters & Tuning
 
