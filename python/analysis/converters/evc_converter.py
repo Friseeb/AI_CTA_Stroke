@@ -20,6 +20,13 @@ def centerline_to_evc_graph(
     centerline_graph: nx.DiGraph,
     output_pickle_path: str | Path | None = None,
     vessel_type_name: str = 'other',
+    endpoint_merge_tol: float | None = None,
+    min_segment_length: float | None = None,
+    min_num_points: int | None = None,
+    min_mean_radius: float | None = None,
+    max_mean_radius: float | None = None,
+    max_tortuosity: float | None = None,
+    keep_largest_component: bool = False,
 ) -> nx.Graph:
     """Convert Antiga centerline graph to EVC format.
 
@@ -39,6 +46,21 @@ def centerline_to_evc_graph(
         If provided, saves EVC-formatted graph as pickle
     vessel_type_name : str
         Vessel type label (default 'other' = unknown)
+    endpoint_merge_tol : float | None
+        If set, merges segment endpoints within this distance (voxel/mm) into
+        shared bifurcation nodes.
+    min_segment_length : float | None
+        Minimum path length for a segment to be kept.
+    min_num_points : int | None
+        Minimum number of centerline points for a segment to be kept.
+    min_mean_radius : float | None
+        Minimum mean radius for a segment to be kept.
+    max_mean_radius : float | None
+        Maximum mean radius for a segment to be kept.
+    max_tortuosity : float | None
+        Maximum tortuosity (path_length / straight_length) for a segment to be kept.
+    keep_largest_component : bool
+        If True, keep only the largest connected component after conversion.
 
     Returns
     -------
@@ -54,6 +76,11 @@ def centerline_to_evc_graph(
 
     # Create undirected graph (EVC uses nx.Graph)
     evc_graph = nx.Graph()
+
+    def endpoint_key(pos: np.ndarray) -> tuple:
+        if endpoint_merge_tol is None or endpoint_merge_tol <= 0:
+            return tuple(pos)
+        return tuple(np.round(np.asarray(pos) / endpoint_merge_tol).astype(int))
 
     # Group nodes by segment_id to reconstruct vessel segments
     segments = {}
@@ -72,28 +99,31 @@ def centerline_to_evc_graph(
     for seg_id in segments:
         segments[seg_id].sort(key=lambda x: x['segment_index'])
 
-    # Create bifurcation nodes (endpoints of segments)
-    bifurcation_nodes = set()
+    # Collect bifurcation endpoints (segment endpoints)
+    endpoint_positions = {}
     for seg_id, nodes in segments.items():
-        start_pos = tuple(nodes[0]['position'])
-        end_pos = tuple(nodes[-1]['position'])
-        bifurcation_nodes.add(start_pos)
-        bifurcation_nodes.add(end_pos)
+        start_pos = np.asarray(nodes[0]['position'], dtype=float)
+        end_pos = np.asarray(nodes[-1]['position'], dtype=float)
+        for pos in (start_pos, end_pos):
+            key = endpoint_key(pos)
+            endpoint_positions.setdefault(key, []).append(pos)
 
     # Add bifurcation nodes to graph
     bifurcation_node_map = {}
-    for i, pos_tuple in enumerate(bifurcation_nodes):
-        evc_graph.add_node(i)
-        # Store position as tuple for now, will add as node attribute
-        bifurcation_node_map[pos_tuple] = i
+    for i, (key, positions) in enumerate(endpoint_positions.items()):
+        mean_pos = np.mean(np.array(positions), axis=0)
+        evc_graph.add_node(i, pos=mean_pos)
+        bifurcation_node_map[key] = i
 
     # Add vessel segments as edges
     for seg_id, nodes in segments.items():
-        start_pos = tuple(nodes[0]['position'])
-        end_pos = tuple(nodes[-1]['position'])
+        start_pos = np.asarray(nodes[0]['position'], dtype=float)
+        end_pos = np.asarray(nodes[-1]['position'], dtype=float)
+        start_key = endpoint_key(start_pos)
+        end_key = endpoint_key(end_pos)
 
-        start_node = bifurcation_node_map[start_pos]
-        end_node = bifurcation_node_map[end_pos]
+        start_node = bifurcation_node_map[start_key]
+        end_node = bifurcation_node_map[end_key]
 
         # Compute segment features
         positions = np.array([n['position'] for n in nodes])
@@ -101,9 +131,23 @@ def centerline_to_evc_graph(
 
         mean_pos = positions.mean(axis=0)
         segment_length = float(np.sum(np.linalg.norm(np.diff(positions, axis=0), axis=1)))
+        straight_length = float(np.linalg.norm(end_pos - start_pos))
         mean_radius = float(radii.mean())
         min_radius = float(radii.min())
         max_radius = float(radii.max())
+        num_points = len(nodes)
+
+        if min_segment_length is not None and segment_length < min_segment_length:
+            continue
+        if min_num_points is not None and num_points < min_num_points:
+            continue
+        if min_mean_radius is not None and mean_radius < min_mean_radius:
+            continue
+        if max_mean_radius is not None and mean_radius > max_mean_radius:
+            continue
+        if max_tortuosity is not None and straight_length > 0:
+            if segment_length / straight_length > max_tortuosity:
+                continue
 
         # EVC edge attributes
         edge_features = np.array([
@@ -111,7 +155,7 @@ def centerline_to_evc_graph(
             mean_radius,
             min_radius,
             max_radius,
-            len(nodes),  # number of points
+            num_points,  # number of points
         ])
 
         evc_graph.add_edge(
@@ -122,6 +166,10 @@ def centerline_to_evc_graph(
             vessel_type_name=vessel_type_name,
             vessel_type=vessel_type_dict.get(vessel_type_name, 0),
         )
+
+    if keep_largest_component and evc_graph.number_of_nodes() > 0:
+        largest_cc = max(nx.connected_components(evc_graph), key=len)
+        evc_graph = evc_graph.subgraph(largest_cc).copy()
 
     # Save if output path provided
     if output_pickle_path is not None:

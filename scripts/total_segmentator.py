@@ -21,10 +21,13 @@ from scripts.build_masks_from_totalseg import combine_masks
 
 BONE_STRUCTURES = [
     "skull",
-    "vertebrae",
-    "rib_left",
-    "rib_right",
-    "sternum",
+    "vertebrae_C1.nii.gz",  # Cervical vertebrae only (head/neck CTA)
+    "vertebrae_C2.nii.gz",
+    "vertebrae_C3.nii.gz",
+    "vertebrae_C4.nii.gz",
+    "vertebrae_C5.nii.gz",
+    "vertebrae_C6.nii.gz",
+    "vertebrae_C7.nii.gz",
 ]
 
 VESSEL_STRUCTURES = [
@@ -50,15 +53,18 @@ VESSEL_STRUCTURES = [
 ]
 
 
-def run_totalseg(input_cta: Path, out_dir: Path):
+def run_totalseg(input_cta: Path, out_dir: Path, roi_subset=None):
     out_dir.mkdir(parents=True, exist_ok=True)
-    totalsegmentator(
-        input=str(input_cta),
-        output=str(out_dir),
-        task="total",
-        fast=True,
-        ml=True,
-    )
+    kwargs = {
+        "input": str(input_cta),
+        "output": str(out_dir),
+        "task": "total",
+        "fast": True,
+        "ml": False,  # individual files per structure
+    }
+    if roi_subset:
+        kwargs["roi_subset"] = roi_subset
+    totalsegmentator(**kwargs)
 
 
 def write_mask(mask, affine, header, output_path: Path, label: str):
@@ -77,6 +83,7 @@ def main():
     ap.add_argument("--out-dir", required=True, help="Directory for TotalSegmentator outputs")
     ap.add_argument("--bone-mask", required=True, help="Output path for combined bone mask")
     ap.add_argument("--vessel-mask", required=True, help="Output path for combined vessel mask")
+    ap.add_argument("--roi-subset", help="Comma-separated list of structures to segment (speeds up CPU)")
     args = ap.parse_args()
 
     input_cta = Path(args.input)
@@ -84,8 +91,11 @@ def main():
     if not input_cta.exists():
         raise FileNotFoundError(f"CTA not found: {input_cta}")
 
+    roi_subset = None
+    if args.roi_subset:
+        roi_subset = [s.strip() for s in args.roi_subset.split(",") if s.strip()]
     print(f"Running TotalSegmentator on {input_cta} -> {out_dir}")
-    run_totalseg(input_cta, out_dir)
+    run_totalseg(input_cta, out_dir, roi_subset=roi_subset)
 
     print("Combining structures into bone/vessel masks")
     bone_mask, affine_b, header_b = combine_masks(out_dir, BONE_STRUCTURES)

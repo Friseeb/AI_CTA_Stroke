@@ -1,0 +1,19 @@
+{
+  "labels": {
+    "0": "background",
+    "1": "BA",
+    "2": "R-PCA",
+    "3": "L-PCA",
+    "4": "R-ICA",
+    "5": "R-MCA",
+    "6": "L-ICA",
+    "7": "L-MCA",
+    "8": "R-Pcom",
+    "9": "L-Pcom",
+    "10": "Acom",
+    "11": "R-ACA",
+    "12": "L-ACA",
+    "15": "3rd-A2"
+  },
+  "note": "CLAIM inference remaps label 13 -> 15 for 3rd-A2 to match the TopCoW challenge label set."
+}

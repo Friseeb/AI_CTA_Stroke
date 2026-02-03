@@ -1,0 +1,17 @@
+name: nv-segment-ct
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - torch==2.6.0
+      - torchvision==0.21.0
+      - monai==1.5.0
+      - transformers
+      - huggingface_hub
+      - nibabel
+      - numpy
+      - scipy
+      - einops
+      - safetensors

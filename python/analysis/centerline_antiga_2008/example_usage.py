@@ -28,6 +28,7 @@ def main():
         step_size=0.1,  # Stage 4: gradient descent step
         max_iterations=5000,  # Stage 4: max gradient descent steps
         contact_distance_threshold=1.0,  # Stage 6: bifurcation detection threshold
+        save_label_map=True,  # Optional: save labeled segmentation map
     )
 
     # Print summary

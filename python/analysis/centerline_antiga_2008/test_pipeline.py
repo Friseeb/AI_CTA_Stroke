@@ -206,6 +206,7 @@ def test_full_pipeline():
             min_component_size=50,
             step_size=0.2,
             max_iterations=1000,
+            save_label_map=True,
         )
 
         # Check results
@@ -216,6 +217,7 @@ def test_full_pipeline():
         assert 'stage6' in results
         assert 'stage7' in results
         assert 'export' in results
+        assert 'label_map' in results
 
         # Print summary
         summary = pipeline.summary()
@@ -226,6 +228,7 @@ def test_full_pipeline():
         assert Path(export_result['pickle_path']).exists()
         assert Path(export_result['json_nodes_path']).exists()
         assert Path(export_result['json_edges_path']).exists()
+        assert Path(results['label_map']['path']).exists()
 
     logger.info('✓ Full pipeline test passed.')
 

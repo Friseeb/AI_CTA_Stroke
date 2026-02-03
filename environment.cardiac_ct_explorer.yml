@@ -1,0 +1,13 @@
+name: cardiac-ct-explorer
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - torch
+      - torchvision
+      - CardiacCTExplorer
+      - nibabel
+      - numpy
+      - scipy
