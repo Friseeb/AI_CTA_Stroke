@@ -151,6 +151,13 @@ def main() -> int:
 
         if not torch.cuda.is_available():
             params["device"] = "cpu"
+            # Guard against any CUDA selection inside CardiacCTExplorer.
+            import cardiacctexplorer.nudf_laa_utils as nudf_utils
+
+            def _safe_select_device(_device: str) -> str:
+                return "cpu"
+
+            nudf_utils.select_device = _safe_select_device
     except Exception:
         pass
 
