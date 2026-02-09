@@ -47,6 +47,17 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--nudf-env", default="cardiac-ct-explorer", help="Conda env for NUDF")
     p.add_argument("--device", default="auto", help="NUDF device: auto|cpu|gpu")
     p.add_argument("--totalseg-device", default=None, help="TotalSegmentator device override")
+    p.add_argument(
+        "--roi-subset-total",
+        default="atrial_appendage_left,pulmonary_vein",
+        help="Comma-separated ROI subset for TotalSegmentator total task",
+    )
+    p.add_argument(
+        "--roi-subset-heartchambers",
+        default="heart_atrium_left,aorta",
+        help="Comma-separated ROI subset for TotalSegmentator heartchambers_highres task",
+    )
+    p.add_argument("--skip-coronary", action="store_true", default=True, help="Skip coronary_arteries task (faster)")
     p.add_argument("--force", action="store_true", help="Recompute even if outputs exist")
     return p.parse_args()
 
@@ -143,6 +154,12 @@ def main() -> int:
         ]
         if args.totalseg_device:
             cmd += ["--totalseg-device", args.totalseg_device]
+        if args.roi_subset_total:
+            cmd += ["--roi-subset-total", args.roi_subset_total]
+        if args.roi_subset_heartchambers:
+            cmd += ["--roi-subset-heartchambers", args.roi_subset_heartchambers]
+        if args.skip_coronary:
+            cmd += ["--skip-coronary"]
 
         _run(cmd, args.dry_run)
 

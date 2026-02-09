@@ -36,6 +36,13 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--device", default="auto", help="auto|cpu|gpu")
     p.add_argument("--run-totalseg", action="store_true", help="Run TotalSegmentator if outputs are missing")
     p.add_argument("--totalseg-device", default=None, help="Override TotalSegmentator device (cpu|gpu)")
+    p.add_argument("--roi-subset-total", default=None, help="Comma-separated ROI subset for TotalSegmentator total task")
+    p.add_argument(
+        "--roi-subset-heartchambers",
+        default=None,
+        help="Comma-separated ROI subset for TotalSegmentator heartchambers_highres task",
+    )
+    p.add_argument("--skip-coronary", action="store_true", help="Skip coronary_arteries task (faster)")
     p.add_argument("--check-env", action="store_true", help="Check environment and exit")
     return p.parse_args()
 
@@ -82,6 +89,15 @@ def _resolve_device(device: str) -> str:
             pass
         return "cpu"
     return device
+
+
+def _parse_roi_subset(raw: str | None) -> list[str] | None:
+    if raw is None:
+        return None
+    raw = raw.strip()
+    if raw == "" or raw.lower() in {"none", "null"}:
+        return None
+    return [x.strip() for x in raw.split(",") if x.strip()]
 
 
 def _ensure_totalseg_outputs(input_path: Path, ts_folder: Path, device: str, run_totalseg: bool) -> None:
@@ -145,6 +161,10 @@ def main() -> int:
     params["device"] = _resolve_device(args.device)
     if args.totalseg_device:
         params["device_totalsegmentator"] = args.totalseg_device
+    params["roi_subset_total"] = _parse_roi_subset(args.roi_subset_total)
+    params["roi_subset_heartchambers"] = _parse_roi_subset(args.roi_subset_heartchambers)
+    if args.skip_coronary:
+        params["skip_coronary"] = True
     # Extra safety: if this torch build has no CUDA, force NUDF to CPU.
     try:
         import torch
