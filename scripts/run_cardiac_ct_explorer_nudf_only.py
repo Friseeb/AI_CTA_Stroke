@@ -72,6 +72,15 @@ def _resolve_device(device: str) -> str:
         except Exception:
             pass
         return "cpu"
+    if device == "gpu":
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                return "gpu"
+        except Exception:
+            pass
+        return "cpu"
     return device
 
 
@@ -136,6 +145,14 @@ def main() -> int:
     params["device"] = _resolve_device(args.device)
     if args.totalseg_device:
         params["device_totalsegmentator"] = args.totalseg_device
+    # Extra safety: if this torch build has no CUDA, force NUDF to CPU.
+    try:
+        import torch
+
+        if not torch.cuda.is_available():
+            params["device"] = "cpu"
+    except Exception:
+        pass
 
     # Set folders and ensure TotalSegmentator outputs are present
     output_dir_str = str(output_dir)
