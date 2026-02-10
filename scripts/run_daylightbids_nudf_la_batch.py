@@ -58,6 +58,7 @@ def _parse_args() -> argparse.Namespace:
         help="Comma-separated ROI subset for TotalSegmentator heartchambers_highres task",
     )
     p.add_argument("--skip-coronary", action="store_true", default=True, help="Skip coronary_arteries task (faster)")
+    p.add_argument("--allow-missing-laa", action="store_true", default=True, help="Write empty LAA if NUDF fails")
     p.add_argument("--force", action="store_true", help="Recompute even if outputs exist")
     return p.parse_args()
 
@@ -160,6 +161,8 @@ def main() -> int:
             cmd += ["--roi-subset-heartchambers", args.roi_subset_heartchambers]
         if args.skip_coronary:
             cmd += ["--skip-coronary"]
+        if args.allow_missing_laa:
+            cmd += ["--allow-missing-laa"]
 
         _run(cmd, args.dry_run)
 

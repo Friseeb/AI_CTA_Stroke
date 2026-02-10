@@ -23,6 +23,9 @@ import os
 import shutil
 from pathlib import Path
 
+import nibabel as nib
+import numpy as np
+
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -43,6 +46,11 @@ def _parse_args() -> argparse.Namespace:
         help="Comma-separated ROI subset for TotalSegmentator heartchambers_highres task",
     )
     p.add_argument("--skip-coronary", action="store_true", help="Skip coronary_arteries task (faster)")
+    p.add_argument(
+        "--allow-missing-laa",
+        action="store_true",
+        help="If NUDF LAA output is missing, create an empty mask and continue",
+    )
     p.add_argument("--check-env", action="store_true", help="Check environment and exit")
     return p.parse_args()
 
@@ -199,6 +207,14 @@ def main() -> int:
     scan_id = _scan_id(input_path)
     default_laa = output_dir / scan_id / "segmentations" / "laa_nudf_label.nii.gz"
     if not default_laa.exists():
+        if args.allow_missing_laa:
+            print(f"WARNING: Expected LAA output not found; writing empty mask: {default_laa}")
+            ref = nib.load(str(input_path))
+            empty = np.zeros(ref.shape, dtype=np.uint8)
+            default_laa.parent.mkdir(parents=True, exist_ok=True)
+            nib.save(nib.Nifti1Image(empty, ref.affine, ref.header), str(default_laa))
+            nib.save(nib.Nifti1Image(empty, ref.affine, ref.header), str(laa_output))
+            return 0
         raise FileNotFoundError(f"Expected LAA output not found: {default_laa}")
     shutil.copy2(default_laa, laa_output)
     print(f"Saved: {laa_output}")
