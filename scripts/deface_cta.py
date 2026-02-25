@@ -167,6 +167,7 @@ def deface_volume(
     totalseg_dir: Path | None = None,
     run_totalseg: bool = False,
     fast_totalseg: bool = True,
+    require_face_mask: bool = False,
     dilation_mm: float = 0.0,
     fill_value: float = -1024.0,
     save_mask: bool = False,
@@ -219,6 +220,11 @@ def deface_volume(
     # Load face mask - try TotalSegmentator first, fall back to anatomical
     face_mask = load_face_mask(totalseg_dir, data.shape)
     if face_mask is None:
+        if require_face_mask:
+            raise RuntimeError(
+                f"TotalSegmentator face mask missing for {input_path}; "
+                "strict mode enabled (--require-face-mask)."
+            )
         print("  Using anatomical fallback for face detection...")
         face_mask = create_anatomical_face_mask(data, voxel_sizes)
 
@@ -332,6 +338,10 @@ def main():
         help="Save the face mask alongside the defaced volume"
     )
     parser.add_argument(
+        "--require-face-mask", action="store_true",
+        help="Fail if TotalSegmentator face mask is missing (disable anatomical fallback)"
+    )
+    parser.add_argument(
         "--recursive", action="store_true",
         help="Search recursively for NIfTI files in input directory"
     )
@@ -379,6 +389,7 @@ def main():
                 totalseg_dir=totalseg_dir,
                 run_totalseg=args.run_totalseg,
                 fast_totalseg=args.fast,
+                require_face_mask=args.require_face_mask,
                 dilation_mm=args.dilation_mm,
                 fill_value=args.fill_value,
                 save_mask=args.save_mask,

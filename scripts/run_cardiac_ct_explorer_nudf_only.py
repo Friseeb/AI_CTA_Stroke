@@ -39,6 +39,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--device", default="auto", help="auto|cpu|gpu")
     p.add_argument("--run-totalseg", action="store_true", help="Run TotalSegmentator if outputs are missing")
     p.add_argument("--totalseg-device", default=None, help="Override TotalSegmentator device (cpu|gpu)")
+    p.add_argument("--totalseg-fast", action="store_true", help="Use TotalSegmentator fast mode (lower memory, lower fidelity)")
     p.add_argument("--roi-subset-total", default=None, help="Comma-separated ROI subset for TotalSegmentator total task")
     p.add_argument(
         "--roi-subset-heartchambers",
@@ -108,7 +109,13 @@ def _parse_roi_subset(raw: str | None) -> list[str] | None:
     return [x.strip() for x in raw.split(",") if x.strip()]
 
 
-def _ensure_totalseg_outputs(input_path: Path, ts_folder: Path, device: str, run_totalseg: bool) -> None:
+def _ensure_totalseg_outputs(
+    input_path: Path,
+    ts_folder: Path,
+    device: str,
+    run_totalseg: bool,
+    fast: bool = False,
+) -> None:
     total_out = ts_folder / "total.nii.gz"
     hc_out = ts_folder / "heartchambers_highres.nii.gz"
     if total_out.exists() and hc_out.exists():
@@ -123,13 +130,18 @@ def _ensure_totalseg_outputs(input_path: Path, ts_folder: Path, device: str, run
     from totalsegmentator.python_api import totalsegmentator
 
     ts_folder.mkdir(parents=True, exist_ok=True)
+    # heartchambers_highres is required by this pipeline and can be unstable with --fast
+    # in some TotalSegmentator builds even if heartchambers itself is called with fast=False.
+    safe_fast = False
+    if fast:
+        print("WARNING: --totalseg-fast requested; running TotalSegmentator in full-resolution for stability.")
     if not total_out.exists():
         totalsegmentator(
             input=str(input_path),
             output=str(total_out),
             task="total",
             ml=True,
-            fast=False,
+            fast=safe_fast,
             device=device,
         )
     if not hc_out.exists():
@@ -138,6 +150,7 @@ def _ensure_totalseg_outputs(input_path: Path, ts_folder: Path, device: str, run
             output=str(hc_out),
             task="heartchambers_highres",
             ml=True,
+            # TotalSegmentator does not support --fast for heartchambers_highres.
             fast=False,
             device=device,
         )
@@ -197,7 +210,13 @@ def main() -> int:
     params = gu.set_and_create_folders(str(input_path), output_dir_str, params)
     ts_folder = Path(params["ts_folder"])
     ts_device = params.get("device_totalsegmentator", params["device"])
-    _ensure_totalseg_outputs(input_path, ts_folder, ts_device, args.run_totalseg)
+    _ensure_totalseg_outputs(
+        input_path=input_path,
+        ts_folder=ts_folder,
+        device=ts_device,
+        run_totalseg=args.run_totalseg,
+        fast=args.totalseg_fast,
+    )
 
     ok = nudf_laa_analysis([str(input_path)], output_dir_str, params)
     if ok is False:
