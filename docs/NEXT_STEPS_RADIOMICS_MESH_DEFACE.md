@@ -9,7 +9,7 @@ Use the new script:
 Install prerequisite if missing:
 
 ```bash
-/home/fridmans/AI/ai-env/bin/pip install pyradiomics
+<PYTHON_BIN_DIR>/pip install pyradiomics
 ```
 
 What it enforces:
@@ -22,20 +22,20 @@ What it enforces:
 Example for all three regions:
 
 ```bash
-/home/fridmans/AI/ai-env/bin/python scripts/run_pyradiomics_ibsi_batch.py \
+<PYTHON_BIN_DIR>/python scripts/run_pyradiomics_ibsi_batch.py \
   --mask-suffix laa_nudf \
   --mask-suffix left_atrium_highres \
   --mask-suffix aorta_highres \
   --isotropic-mm 1.0 \
   --bin-width 25 \
   --save-preprocessed \
-  --output-csv /media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids/derivatives/radiomics/pyradiomics_ibsi_batch.csv
+  --output-csv <BIDS_ROOT>/derivatives/radiomics/pyradiomics_ibsi_batch.csv
 ```
 
 If you want a subset:
 
 ```bash
-/home/fridmans/AI/ai-env/bin/python scripts/run_pyradiomics_ibsi_batch.py \
+<PYTHON_BIN_DIR>/python scripts/run_pyradiomics_ibsi_batch.py \
   --subject 642 --subject 646 \
   --mask-suffix laa_nudf --mask-suffix left_atrium_highres --mask-suffix aorta_highres
 ```
@@ -55,9 +55,9 @@ Capabilities:
 Example:
 
 ```bash
-/home/fridmans/AI/ai-env/bin/python scripts/run_laa_shape_descriptors.py \
-  --batch-mask-root /media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids/derivatives/nudf_la \
-  --output-dir /media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids/derivatives/meshes \
+<PYTHON_BIN_DIR>/python scripts/run_laa_shape_descriptors.py \
+  --batch-mask-root <BIDS_ROOT>/derivatives/nudf_la \
+  --output-dir <BIDS_ROOT>/derivatives/meshes \
   --mask-suffix laa_nudf \
   --mask-suffix left_atrium_highres \
   --mask-suffix aorta_highres \
@@ -81,16 +81,16 @@ Example:
 ```bash
 python3 scripts/run_cta_deface_dl_batch.py \
   --backend pydeface \
-  --input-dir /media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids \
+  --input-dir <BIDS_ROOT> \
   --glob 'sub-*_acq-CTA_ct.nii.gz' \
-  --output-dir /media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids/derivatives/defaced_pydeface \
+  --output-dir <BIDS_ROOT>/derivatives/defaced_pydeface \
   --pydeface-bin pydeface
 ```
 
 Environment checks:
 
 ```bash
-/home/fridmans/AI/ai-env/bin/python scripts/run_pyradiomics_ibsi_batch.py --check-env
+<PYTHON_BIN_DIR>/python scripts/run_pyradiomics_ibsi_batch.py --check-env
 python3 -c "import shutil,sys; p=shutil.which('pydeface'); print(p); sys.exit(0 if p else 1)"
 ```
 

@@ -7,8 +7,8 @@ runs inference with a label prompt, and writes a single NIfTI mask.
 
 Example:
   python scripts/run_nv_segment_ct_laa.py \
-    --input /path/to/sub-547_defaced.nii.gz \
-    --output /path/to/sub-547_defaced_laa108.nii.gz \
+    --input /path/to/<CASE_ID>_defaced.nii.gz \
+    --output /path/to/<CASE_ID>_defaced_laa108.nii.gz \
     --model-dir /path/to/external/nv_segment_ct \
     --device auto
 

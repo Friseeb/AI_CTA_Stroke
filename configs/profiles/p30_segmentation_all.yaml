@@ -1,0 +1,19 @@
+profile_id: p30_segmentation_all
+stage: segmentation
+run:
+  deface: true
+  totalseg: true
+  topcow: true
+  nv_laa: true
+  nv_aorta: true
+  nudf_laa: true
+  merge_labels: true
+envs:
+  totalseg: totalseg-mac
+  topcow: topcow_claim
+  nv: nv-segment-ct
+  nudf: cardiac-ct-explorer
+  merge: cardiac-ct-explorer
+outputs:
+  merged_labelmap: labels_all.nii.gz
+  merged_labels_json: labels_all.json

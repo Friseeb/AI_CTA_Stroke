@@ -7,6 +7,7 @@ set -euo pipefail
 ENV_NAME="${1:-cardiac-ct-explorer}"
 PY_VER="3.10"
 TORCH_INDEX="https://download.pytorch.org/whl/cpu"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if ! command -v conda >/dev/null 2>&1; then
   echo "conda not found. Install Miniconda/Anaconda first." >&2
@@ -29,8 +30,8 @@ conda activate "${ENV_NAME}"
 pip install torch torchvision --extra-index-url "${TORCH_INDEX}"
 
 # CardiacCTExplorer and deps (prefer local clone if present)
-if [ -d "AI_CTA_Stroke/external/cardiac_ct_explorer" ]; then
-  pip install -e "AI_CTA_Stroke/external/cardiac_ct_explorer"
+if [ -d "${ROOT_DIR}/external/cardiac_ct_explorer" ]; then
+  pip install -e "${ROOT_DIR}/external/cardiac_ct_explorer"
 else
   pip install CardiacCTExplorer
 fi
@@ -38,7 +39,7 @@ fi
 # Extra deps for IO
 pip install nibabel numpy scipy
 
-cat <<'EOF'
+cat <<EOF
 
 Env ready: ${ENV_NAME}
 Reminder: TotalSegmentator requires an academic license key for heartchambers_highres.

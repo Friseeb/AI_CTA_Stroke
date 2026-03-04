@@ -47,6 +47,8 @@ class Worker:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Batch CTA-DEFACE inference on multi-GPU")
+    default_model_dir = Path(__file__).resolve().parents[1] / "external" / "CTA-DEFACE" / "model"
+    default_tmp_root = Path(__file__).resolve().parents[1] / "tmp" / "cta_deface_batch"
     p.add_argument(
         "--backend",
         choices=["cta-deface", "pydeface"],
@@ -55,27 +57,27 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--input-dir",
-        default="/media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids",
+        default="./data/daylightbids",
         help="Input CTA folder (sub-*_acq-CTA_ct.nii.gz)",
     )
     p.add_argument(
         "--output-dir",
-        default="/media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids/derivatives/defaced",
+        default="./data/daylightbids/derivatives/defaced",
         help="Output folder for defaced NIfTI files",
     )
     p.add_argument(
         "--mask-dir",
-        default="/media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids/derivatives/deface_masks",
+        default="./data/daylightbids/derivatives/deface_masks",
         help="Output folder for predicted face masks",
     )
     p.add_argument(
         "--model-dir",
-        default="/home/fridmans/Documents/pwd/AI_CTA_Stroke/external/CTA-DEFACE/model",
+        default=str(default_model_dir),
         help="CTA-DEFACE model root containing Dataset001_DEFACE",
     )
     p.add_argument(
         "--nnunet-bin",
-        default="/home/fridmans/AI/ai-env/bin/nnUNetv2_predict",
+        default="nnUNetv2_predict",
         help="Path to nnUNetv2_predict binary",
     )
     p.add_argument(
@@ -100,7 +102,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--tmp-root",
-        default="/home/fridmans/Documents/pwd/AI_CTA_Stroke/tmp/cta_deface_batch",
+        default=str(default_tmp_root),
         help="Temporary workspace root",
     )
     return p.parse_args()

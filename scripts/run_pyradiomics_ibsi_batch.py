@@ -72,13 +72,13 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--image-dir",
-        default="/media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids",
+        default="./data/daylightbids",
         help="Directory containing sub-*_acq-CTA_ct.nii.gz images",
     )
     p.add_argument("--image-glob", default="sub-*_acq-CTA_ct.nii.gz", help="Input image glob")
     p.add_argument(
         "--mask-root",
-        default="/media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids/derivatives/nudf_la",
+        default="./data/daylightbids/derivatives/nudf_la",
         help="Root containing <case>/<case>_<region>.nii.gz masks",
     )
     p.add_argument(
@@ -92,7 +92,7 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--output-csv",
-        default="/media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids/derivatives/radiomics/pyradiomics_ibsi_batch.csv",
+        default="./data/daylightbids/derivatives/radiomics/pyradiomics_ibsi_batch.csv",
         help="Output CSV path",
     )
     p.add_argument("--subject", action="append", default=[], help="Optional subject IDs (repeatable)")

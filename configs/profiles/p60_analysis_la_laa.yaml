@@ -1,0 +1,14 @@
+profile_id: p60_analysis_la_laa
+stage: analysis
+roi_groups: [heart]
+modules:
+  radiomics: true
+  shape: true
+  calcium_score: true
+  atheroburden: true
+  tortuosity: false
+products:
+  - radiomics_csv
+  - la_laa_metrics_csv
+  - la_laa_shape_report_html
+  - clustering_outputs
