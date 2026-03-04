@@ -1,0 +1,3 @@
+case_id,dicom_dir,input_nifti
+sub-001,/path/to/dicom/sub-001,
+sub-002,,/path/to/nifti/sub-002_acq-CTA_ct.nii.gz

@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate HTML report for radiomics clustering results.")
     p.add_argument(
         "--radiomics-dir",
-        default="/mnt/cta_ssd/daylightbids/derivatives/radiomics",
+        default="./outputs/radiomics",
         help="Directory containing clustering CSV/JSON outputs.",
     )
     p.add_argument(

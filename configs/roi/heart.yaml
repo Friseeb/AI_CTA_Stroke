@@ -1,0 +1,17 @@
+roi_group: heart
+labels:
+  left_atrium:
+    id: 8
+    sources: [totalseg_heartchambers_highres]
+  left_atrial_appendage:
+    ids: [9, 10, 11]
+    sources: [totalseg_total, nv_segment_ct, nudf]
+  aorta:
+    ids: [1, 12]
+    sources: [totalseg_total, nv_segment_ct]
+analysis_defaults:
+  radiomics: true
+  shape: true
+  calcium_score: true
+  atheroburden: true
+  tortuosity: false

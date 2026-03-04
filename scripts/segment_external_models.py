@@ -8,8 +8,8 @@ invokes TotalSegmentator and/or MONAI models.
 Examples:
   # TotalSegmentator (total + head/neck + heartchambers)
   python -u scripts/segment_external_models.py \
-    --input data/sub-547_0000.nii.gz \
-    --output outputs/seg_547 \
+    --input data/<CASE_ID>_0000.nii.gz \
+    --output outputs/seg_<CASE_ID> \
     --totalseg-task total \
     --totalseg-task headneck_bones_vessels \
     --totalseg-task heartchambers_highres \
@@ -18,8 +18,8 @@ Examples:
 
   # MONAI bundle (override input/output keys in config)
   python -u scripts/segment_external_models.py \
-    --input data/sub-547_0000.nii.gz \
-    --output outputs/seg_547 \
+    --input data/<CASE_ID>_0000.nii.gz \
+    --output outputs/seg_<CASE_ID> \
     --monai-bundle /path/to/monai_bundle \
     --monai-config configs/inference.json \
     --monai-meta configs/metadata.json \

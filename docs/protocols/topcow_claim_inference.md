@@ -83,18 +83,13 @@ python AI_CTA_Stroke/scripts/run_topcow_claim.py \
 
 For folders, pass `--input /path/to/folder` and all `.nii/.nii.gz` files will be processed.
 
-## Integrated into CTA pipeline
+## Integrated pipeline note
 
-You can run TopCoW as part of `scripts/run_cta_pipeline.py`:
+`scripts/run_cta_pipeline.py` was removed during centerline cleanup.
+Use direct wrappers instead:
 
-```
-python -u AI_CTA_Stroke/scripts/run_cta_pipeline.py \
-  --input /path/to/cta.nii.gz \
-  --output /path/to/output \
-  --run-topcow \
-  --topcow-yolo-model /path/to/topcow_weights/models/yolo-cow-detection.pt \
-  --topcow-nnunet-model-dir /path/to/topcow_weights/models/topcow-claim-models
-```
+- TopCoW inference: `scripts/run_topcow_claim.py`
+- Multi-label merge: `scripts/build_multilabel_vascular_map.py`
 
 ## Multi-label merge (extra + intracranial)
 
@@ -102,17 +97,19 @@ To build a single multi-label NIfTI that includes aorta/subclavians/carotids/LA/
 plus TopCoW intracranial labels:
 
 ```
+python AI_CTA_Stroke/scripts/build_multilabel_vascular_map.py \
+  --reference /path/to/cta.nii.gz \
+  --output /path/to/output/labels_multilabel.nii.gz \
+  --totalseg-dir /path/to/totalseg_total \
+  --headneck-dir /path/to/totalseg_headneck \
+  --heartchambers-dir /path/to/totalseg_heartchambers \
+  --topcow /path/to/topcow_out/case_topcow_seg.nii.gz \
+  --labels-json /path/to/output/labels_multilabel.json
+```
 
 By default, TopCoW labels are offset by +100 in the merged label map to avoid
-collisions with extracranial labels. Set `--multilabel-topcow-offset 0` if you
-want the native TopCoW IDs (note that this will collide with extracranial IDs).
-python -u AI_CTA_Stroke/scripts/run_cta_pipeline.py \
-  --input /path/to/cta.nii.gz \
-  --output /path/to/output \
-  --run-topcow \
-  --topcow-yolo-model /path/to/topcow_weights/models/yolo-cow-detection.pt \
-  --topcow-nnunet-model-dir /path/to/topcow_weights/models/topcow-claim-models \
-  --build-multilabel
+collisions with extracranial labels. Set `--topcow-offset 0` if you want native
+TopCoW IDs (this can collide with extracranial IDs).
 ```
 
 ## Notes

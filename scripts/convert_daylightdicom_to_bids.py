@@ -403,12 +403,12 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Convert DAYLIGHT DICOM to CTA BIDS-style NIfTI")
     p.add_argument(
         "--src-root",
-        default="/media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/DAYLIGHTDICOM",
+        default="./data/DAYLIGHTDICOM",
         help="Source root containing subject folders",
     )
     p.add_argument(
         "--out-root",
-        default="/media/fridmans/b202ad4e-785a-49f0-a418-ec73cd117466/datasets/daylightbids",
+        default="./data/daylightbids",
         help="Destination root for sub-*_acq-CTA_ct.nii.gz",
     )
     p.add_argument("--min-files", type=int, default=300, help="Minimum DICOM count for CTA source series")

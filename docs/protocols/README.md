@@ -1,8 +1,21 @@
-# Protocols and SOPs
+# Protocol Index
 
-Standard Operating Procedures for the project:
+Current protocol documents:
 
-- `imaging_qc_sop.md` - CTA quality control checklist
-- `ai_training_sop.md` - Model training and validation workflow
-- `data_linkage_sop.md` - Linking imaging to clinical outcomes (REDCap)
-- `bids_conversion_sop.md` - DICOM to BIDS conversion standards
+- `docs/protocols/laa_highres_dataset_setup.md`
+- `docs/protocols/script_setup.md`
+- `docs/protocols/topcow_claim_inference.md`
+
+Primary workflow entrypoint:
+
+- `README.md` (master DICOM -> NIfTI -> deface -> substudies flow)
+- `subprojects/la_laa/README.md` (LA/LAA substudy home)
+- `scripts/README.md` (script map + naming rubric)
+- `docs/architecture/ORGANIZATION_BLUEPRINT.md` (target organization)
+- `docs/architecture/MIGRATION_MAP.md` (incremental transition map)
+- `configs/profiles/README.md` (study/analysis profiles)
+
+Path policy:
+
+- Use placeholders like `<PROJECT_ROOT>`, `<DATA_ROOT>`, `<BIDS_ROOT>`, `<CASE_ID>`
+- Avoid machine-specific absolute paths in docs and scripts
