@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CT Classification Rules — convert_daylightdicom_to_bids</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 13px; margin: 32px; color: #222; max-width: 1100px; }
+  h1 { font-size: 22px; margin-bottom: 4px; color: #1a237e; }
+  h2 { font-size: 16px; color: #283593; margin-top: 32px; border-bottom: 2px solid #c5cae9; padding-bottom: 4px; }
+  h3 { font-size: 14px; color: #37474f; margin-top: 20px; }
+  .meta { color: #666; font-size: 12px; margin-bottom: 24px; }
+  .step { background: #f5f5f5; border-left: 4px solid #5c6bc0; padding: 12px 16px; margin: 12px 0; border-radius: 0 6px 6px 0; }
+  .step strong { color: #283593; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+  th, td { border: 1px solid #ccc; padding: 6px 10px; text-align: left; vertical-align: top; }
+  th { background: #e8eaf6; color: #1a237e; }
+  tr:nth-child(even) { background: #fafafa; }
+  .badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; white-space: nowrap; }
+  .ecta    { background: #c8e6c9; color: #1b5e20; }
+  .ctheart { background: #ffccbc; color: #bf360c; }
+  .ctthorax{ background: #b3e5fc; color: #01579b; }
+  .ctbody  { background: #e1bee7; color: #4a148c; }
+  .ctabdomen{ background: #fff9c4; color: #795548; }
+  .note { background: #fffde7; border: 1px solid #f9a825; border-radius: 4px; padding: 8px 12px; margin: 8px 0; font-size: 12px; }
+  .warn { background: #fff3e0; border: 1px solid #ff9800; border-radius: 4px; padding: 8px 12px; margin: 8px 0; font-size: 12px; }
+  .coverage-bar-wrap { margin: 20px 0 8px 0; }
+  .bar-label { font-size: 11px; color: #555; margin-bottom: 2px; }
+  .bar-row { display: flex; align-items: center; margin-bottom: 4px; gap: 8px; }
+  .bar-name { width: 110px; text-align: right; font-size: 12px; font-weight: bold; flex-shrink: 0; }
+  .bar-outer { flex: 1; background: #e0e0e0; border-radius: 4px; height: 18px; position: relative; }
+  .bar-inner { height: 18px; border-radius: 4px; position: absolute; display: flex; align-items: center; padding-left: 6px; font-size: 11px; color: #fff; font-weight: bold; white-space: nowrap; overflow: hidden; }
+  .bar-tick { position: absolute; top: 0; bottom: 0; width: 1px; background: #9e9e9e; }
+  .tick-label { position: absolute; top: 20px; font-size: 10px; color: #888; transform: translateX(-50%); }
+  .bar-scale { position: relative; height: 24px; flex: 1; margin-left: 118px; margin-bottom: 8px; }
+  .kw-list { margin: 0; padding: 0 0 0 18px; }
+  .kw-list li { margin-bottom: 2px; }
+  .score-chip { display: inline-block; background: #283593; color: #fff; border-radius: 3px; padding: 1px 6px; font-size: 11px; margin-left: 4px; }
+  code { background: #f5f5f5; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+  .flow { display: flex; gap: 0; align-items: stretch; margin: 16px 0; flex-wrap: wrap; }
+  .flow-box { background: #e8eaf6; border: 1px solid #9fa8da; border-radius: 6px; padding: 10px 14px; min-width: 160px; font-size: 12px; flex: 1; }
+  .flow-arrow { display: flex; align-items: center; font-size: 20px; color: #5c6bc0; padding: 0 8px; }
+  .flow-box b { color: #1a237e; }
+</style>
+</head>
+<body>
+
+<h1>CT Classification Rules</h1>
+<div class="meta">
+  Script: <code>scripts/convert_daylightdicom_to_bids.py</code> &nbsp;|&nbsp;
+  Pipeline: DICOM → NIfTI (SLAAOBIDS format) &nbsp;|&nbsp;
+  Last updated: 2026-03-16
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>1. Classification Pipeline Overview</h2>
+
+<p>Each DICOM export folder (one study) is classified through <strong>3 sequential steps</strong>:</p>
+
+<div class="flow">
+  <div class="flow-box">
+    <b>Step 1 — Coverage Gate</b><br>
+    Measure anatomical coverage from <code>ImagePositionPatient</code> z-coordinates.<br>
+    If outside the bounds → disqualify (score = 0).
+  </div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box">
+    <b>Step 2 — Keyword Scoring</b><br>
+    Match DICOM text fields against keywords.<br>
+    StudyDescription +150 · ProtocolName +80 · BodyPart +50.<br>
+    Minimum ≥ 50 pts required.
+  </div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-box">
+    <b>Step 3 — Winner</b><br>
+    Highest-scoring type wins.<br>
+    If no type qualifies → study is <em>skipped</em> (not converted).
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>2. Step 1 — Anatomical Coverage Exclusion (Hard Gate)</h2>
+
+<div class="step">
+  <strong>coverage_mm = | z_max − z_min |</strong> — measured from the <code>ImagePositionPatient</code> DICOM tag,
+  sampling ~20 evenly-spaced files from the largest series in the export.<br><br>
+  This metric is <strong>scanner-independent and center-independent</strong> — it reflects true anatomical extent
+  regardless of PACS naming conventions or language.<br><br>
+  If <code>ImagePositionPatient</code> is absent (tag missing), the coverage gate is <em>skipped</em> and
+  classification falls back to keywords only.
+</div>
+
+<h3>Coverage Ranges per Type</h3>
+
+<div class="coverage-bar-wrap">
+  <!-- Scale: 0–900mm mapped to 100% width -->
+  <div class="bar-scale">
+    <span style="position:absolute;left:0%;font-size:10px;color:#888">0</span>
+    <span style="position:absolute;left:11.1%;font-size:10px;color:#888">100</span>
+    <span style="position:absolute;left:22.2%;font-size:10px;color:#888">200</span>
+    <span style="position:absolute;left:33.3%;font-size:10px;color:#888">300</span>
+    <span style="position:absolute;left:44.4%;font-size:10px;color:#888">400</span>
+    <span style="position:absolute;left:55.6%;font-size:10px;color:#888">500</span>
+    <span style="position:absolute;left:66.7%;font-size:10px;color:#888">600</span>
+    <span style="position:absolute;left:77.8%;font-size:10px;color:#888">700</span>
+    <span style="position:absolute;left:88.9%;font-size:10px;color:#888">800</span>
+    <span style="position:absolute;left:100%;font-size:10px;color:#888">900 mm</span>
+  </div>
+
+  <!-- CTA: 100–550mm → left=11.1%, width=50% -->
+  <div class="bar-row">
+    <div class="bar-name"><span class="badge ecta">ecta</span></div>
+    <div class="bar-outer">
+      <div class="bar-inner" style="left:11.1%;width:49.9%;background:#388e3c;">100 – 550 mm</div>
+    </div>
+  </div>
+
+  <!-- CardiacCT: 80–300mm → left=8.9%, width=24.4% -->
+  <div class="bar-row">
+    <div class="bar-name"><span class="badge ctheart">ctheart</span></div>
+    <div class="bar-outer">
+      <div class="bar-inner" style="left:8.9%;width:24.4%;background:#e64a19;">80 – 300 mm</div>
+    </div>
+  </div>
+
+  <!-- ThoraxCT: 200–500mm → left=22.2%, width=33.3% -->
+  <div class="bar-row">
+    <div class="bar-name"><span class="badge ctthorax">ctthorax</span></div>
+    <div class="bar-outer">
+      <div class="bar-inner" style="left:22.2%;width:33.3%;background:#0288d1;">200 – 500 mm</div>
+    </div>
+  </div>
+
+  <!-- TotalBodyCT: 450mm+ → left=50%, width=50% -->
+  <div class="bar-row">
+    <div class="bar-name"><span class="badge ctbody">ctbody</span></div>
+    <div class="bar-outer">
+      <div class="bar-inner" style="left:50%;width:50%;background:#7b1fa2;">≥ 450 mm (no upper limit)</div>
+    </div>
+  </div>
+
+  <!-- AbdomenCT: 200–700mm → left=22.2%, width=55.6% -->
+  <div class="bar-row">
+    <div class="bar-name"><span class="badge ctabdomen">ctabdomen</span></div>
+    <div class="bar-outer">
+      <div class="bar-inner" style="left:22.2%;width:55.6%;background:#f57f17;">200 – 700 mm</div>
+    </div>
+  </div>
+</div>
+
+<div class="note">
+  <strong>Overlap zones</strong> — multiple types may survive the coverage gate simultaneously (e.g. a 480 mm scan
+  passes both CTA and TotalBodyCT). Keyword scoring in Step 2 resolves the tie.
+</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>3. Step 2 — Keyword Scoring</h2>
+
+<table>
+  <thead>
+    <tr><th>DICOM Field</th><th>Points</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>StudyDescription</code></td><td><strong>+150</strong></td><td>Most reliable label — highest weight. Only one keyword needs to match.</td></tr>
+    <tr><td><code>ProtocolName</code></td><td><strong>+80</strong></td><td>Medium weight.</td></tr>
+    <tr><td><code>BodyPartExamined</code></td><td><strong>+50</strong></td><td>Lowest weight. Sometimes absent or generic.</td></tr>
+  </tbody>
+</table>
+
+<p>All keyword matching is <strong>case-insensitive substring</strong> search.
+At most <strong>one bonus per field per type</strong> (first match wins, loop breaks).<br>
+<strong>Minimum threshold: ≥ 50 pts</strong> — a type with no keyword match at all is rejected even if it passed the coverage gate.</p>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>4. Per-Type Keyword Lists</h2>
+
+<!-- CTA -->
+<h3><span class="badge ecta">CTA — acq-ecta</span></h3>
+<table>
+  <tr><th>Field</th><th>Keywords</th><th>Score if matched</th></tr>
+  <tr>
+    <td>StudyDescription</td>
+    <td><code>cta</code>, <code>angio</code>, <code>angiograph</code>, <code>ecta</code>,
+        <code>head/neck</code>, <code>head neck</code>, <code>tia</code>, <code>stroke</code></td>
+    <td>+150</td>
+  </tr>
+  <tr>
+    <td>ProtocolName</td>
+    <td><code>cta</code>, <code>angio</code>, <code>head/neck</code>, <code>tia</code></td>
+    <td>+80</td>
+  </tr>
+  <tr>
+    <td>BodyPartExamined</td>
+    <td><code>head</code>, <code>neck</code>, <code>brain</code>, <code>cerebr</code>, <code>carotid</code></td>
+    <td>+50</td>
+  </tr>
+</table>
+<div class="note">
+  Coverage 100–550 mm. Upper bound raised from 450 → 550 mm to accommodate extended head-to-diaphragm CTA protocols.
+  In the 450–550 mm overlap with TotalBodyCT, keyword scoring differentiates them ("cta"/"angio" vs "dissection"/"whole body").
+</div>
+
+<!-- CardiacCT -->
+<h3><span class="badge ctheart">CardiacCT — acq-ctheart</span></h3>
+<table>
+  <tr><th>Field</th><th>Keywords</th><th>Score if matched</th></tr>
+  <tr>
+    <td>StudyDescription</td>
+    <td><code>cardiac</code>, <code>heart</code>, <code>coronary</code>, <code>ccta</code>,
+        <code>calcium</code>, <code>cac</code>, <code>cardio</code>, <code>ctheart</code>, <code>aortic</code></td>
+    <td>+150</td>
+  </tr>
+  <tr>
+    <td>ProtocolName</td>
+    <td><code>cardiac</code>, <code>heart</code>, <code>coronary</code>, <code>ccta</code>, <code>cac</code>, <code>cardio</code></td>
+    <td>+80</td>
+  </tr>
+  <tr>
+    <td>BodyPartExamined</td>
+    <td><code>heart</code>, <code>cardiac</code>, <code>coronary</code></td>
+    <td>+50</td>
+  </tr>
+</table>
+<div class="note">Coverage 80–300 mm. Multi-phase export enabled.</div>
+
+<!-- ThoraxCT -->
+<h3><span class="badge ctthorax">ThoraxCT — acq-ctthorax</span></h3>
+<table>
+  <tr><th>Field</th><th>Keywords</th><th>Score if matched</th></tr>
+  <tr>
+    <td>StudyDescription</td>
+    <td><code>thorax</code>, <code>chest</code>, <code>lung</code>, <code>pulmonar</code>,
+        <code>thoracic</code>, <code>hrct</code>, <code>hrtx</code>, <code>ctthorax</code></td>
+    <td>+150</td>
+  </tr>
+  <tr>
+    <td>ProtocolName</td>
+    <td><code>thorax</code>, <code>chest</code>, <code>lung</code>, <code>pulmonar</code>, <code>hrct</code></td>
+    <td>+80</td>
+  </tr>
+  <tr>
+    <td>BodyPartExamined</td>
+    <td><code>thorax</code>, <code>lung</code>, <code>thorac</code>, <code>chest</code></td>
+    <td>+50</td>
+  </tr>
+</table>
+<div class="note">
+  Coverage 200–500 mm. <strong>"chest" is safe here</strong> because any combined Chest/Abdomen/Pelvis study
+  exceeds 500 mm and is excluded by the coverage upper bound before keywords are even checked.
+</div>
+
+<!-- TotalBodyCT -->
+<h3><span class="badge ctbody">TotalBodyCT — acq-ctbody</span></h3>
+<table>
+  <tr><th>Field</th><th>Keywords</th><th>Score if matched</th></tr>
+  <tr>
+    <td>StudyDescription</td>
+    <td><code>thorax/abdomen</code>, <code>chest/abdomen</code>, <code>thorax abdomen</code>,
+        <code>body</code>, <code>total body</code>, <code>whole body</code>, <code>totalbody</code>,
+        <code>dissection</code></td>
+    <td>+150</td>
+  </tr>
+  <tr>
+    <td>ProtocolName</td>
+    <td><code>dissection</code>, <code>cap</code>, <code>chest abdo pelvis</code>,
+        <code>whole body</code>, <code>thorax abdo</code>, <code>chest abdo</code></td>
+    <td>+80</td>
+  </tr>
+  <tr>
+    <td>BodyPartExamined</td>
+    <td><code>chest_to_pelvis</code>, <code>whole_body</code>, <code>wholebody</code></td>
+    <td>+50</td>
+  </tr>
+</table>
+<div class="note">Coverage ≥ 450 mm (no upper limit). Multi-phase export enabled. Designed for aortic dissection, trauma, whole-body oncology.</div>
+
+<!-- AbdomenCT -->
+<h3><span class="badge ctabdomen">AbdomenCT — acq-ctabdomen</span></h3>
+<table>
+  <tr><th>Field</th><th>Keywords</th><th>Score if matched</th></tr>
+  <tr>
+    <td>StudyDescription</td>
+    <td><code>abdomen</code>, <code>abdomin</code>, <code>liver</code>, <code>pelvis</code>,
+        <code>abdopelv</code>, <code>portal</code>, <code>porto</code>, <code>ctabdomen</code>,
+        <code>abdomen/pelvis</code></td>
+    <td>+150</td>
+  </tr>
+  <tr>
+    <td>ProtocolName</td>
+    <td><code>abdomen</code>, <code>abdomin</code>, <code>liver</code>, <code>pelvis</code>,
+        <code>abdopelv</code>, <code>portal</code></td>
+    <td>+80</td>
+  </tr>
+  <tr>
+    <td>BodyPartExamined</td>
+    <td><code>abdomen</code>, <code>abdo</code>, <code>liver</code>, <code>pelvis</code>, <code>abdopelv</code></td>
+    <td>+50</td>
+  </tr>
+</table>
+<div class="note">Coverage 200–700 mm. Multi-phase export enabled.</div>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>5. NIfTI Size Gate</h2>
+
+<p>After conversion, the output NIfTI file size is checked. If outside the range → status = <code>size_rejected</code> (file is deleted).</p>
+
+<table>
+  <thead><tr><th>Type</th><th>Min (MB)</th><th>Max (MB)</th></tr></thead>
+  <tbody>
+    <tr><td><span class="badge ecta">ecta</span></td><td>150</td><td>600</td></tr>
+    <tr><td><span class="badge ctheart">ctheart</span></td><td>30</td><td>700</td></tr>
+    <tr><td><span class="badge ctthorax">ctthorax</span></td><td>80</td><td>900</td></tr>
+    <tr><td><span class="badge ctbody">ctbody</span></td><td>80</td><td>1500</td></tr>
+    <tr><td><span class="badge ctabdomen">ctabdomen</span></td><td>80</td><td>1200</td></tr>
+  </tbody>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>6. Other Pipeline Behaviours</h2>
+
+<table>
+  <thead><tr><th>Feature</th><th>Behaviour</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Idempotent re-runs</strong></td>
+      <td>If the output NIfTI already exists → status = <code>skip_exists</code>. No re-conversion.</td>
+    </tr>
+    <tr>
+      <td><strong>Multi-phase export</strong></td>
+      <td>CardiacCT, TotalBodyCT, AbdomenCT: all source series exported as <code>_ph00</code>, <code>_ph01</code>, …</td>
+    </tr>
+    <tr>
+      <td><strong>Slice ordering</strong></td>
+      <td>Sorted by z-position (ImagePositionPatient) if ≥70% of slices have the tag, otherwise by InstanceNumber.</td>
+    </tr>
+    <tr>
+      <td><strong>Dimension deduplication</strong></td>
+      <td>Mixed-size series (axial + coronal/sagittal reformats) filtered to dominant Rows×Columns pair.</td>
+    </tr>
+    <tr>
+      <td><strong>Subject sort order</strong></td>
+      <td>Numeric sort (1, 2, 3 … 299), not alphabetic (1, 10, 100 …).</td>
+    </tr>
+    <tr>
+      <td><strong>Output report</strong></td>
+      <td>HTML report (<code>conversion_report_&lt;timestamp&gt;.html</code>) + CSV manifest generated at end of each run.</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h2>7. Worked Examples</h2>
+
+<table>
+  <thead><tr><th>StudyDescription (PACS)</th><th>Coverage</th><th>Winner</th><th>Reason</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>CTA Head/Neck</td><td>350 mm</td>
+      <td><span class="badge ecta">ecta</span></td>
+      <td>Passes CTA gate (100–550). "cta" → +150. Highest scorer.</td>
+    </tr>
+    <tr>
+      <td>CTA Head to Diaphragm</td><td>490 mm</td>
+      <td><span class="badge ecta">ecta</span></td>
+      <td>Passes CTA gate (≤550). "cta" → +150. TotalBodyCT gets 0 (no dissection/whole body keywords).</td>
+    </tr>
+    <tr>
+      <td>CT Aortic Dissection</td><td>700 mm</td>
+      <td><span class="badge ctbody">ctbody</span></td>
+      <td>CTA disqualified (>550). TotalBodyCT passes (≥450). "dissection" → +150.</td>
+    </tr>
+    <tr>
+      <td>CT Chest</td><td>320 mm</td>
+      <td><span class="badge ctthorax">ctthorax</span></td>
+      <td>Passes ThoraxCT gate (200–500). "chest" → +150.</td>
+    </tr>
+    <tr>
+      <td>CT Chest/Abdomen/Pelvis</td><td>650 mm</td>
+      <td><span class="badge ctbody">ctbody</span></td>
+      <td>ThoraxCT disqualified (>500). TotalBodyCT passes (≥450). "chest/abdomen" → +150.</td>
+    </tr>
+    <tr>
+      <td>CT Cardiac Calcium Score</td><td>120 mm</td>
+      <td><span class="badge ctheart">ctheart</span></td>
+      <td>Passes CardiacCT gate (80–300). "calcium" → +150.</td>
+    </tr>
+    <tr>
+      <td>CT Abdomen/Pelvis Portal Phase</td><td>400 mm</td>
+      <td><span class="badge ctabdomen">ctabdomen</span></td>
+      <td>Passes AbdomenCT gate (200–700). "abdomen" → +150, "portal" → +80. Highest scorer.</td>
+    </tr>
+  </tbody>
+</table>
+
+</body>
+</html>
