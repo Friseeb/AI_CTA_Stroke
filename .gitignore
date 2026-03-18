@@ -1,0 +1,45 @@
+# Large outputs and temporary files
+outputs/
+logs/
+centerline/
+*.nii.gz
+*.nii
+*.npy
+*.pkl
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.Python
+env/
+venv/
+.venv
+.venv*/
+**/.venv*/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Conda
+.conda/
+
+# Data
+data/
+test_data/
+
+# TotalSegmentator cache
+~/.totalsegmentator/
+
+# Temporary
+tmp_*
+*.tmp
+*.log

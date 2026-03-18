@@ -1,0 +1,122 @@
+Batch started: 2026-03-10 16:20:25.870093
+Total patients: 87
+
+SUCCESS: sub-101 (3s)
+FAILED: sub-102
+ain\scripts\run_cardiac_ct_explorer_nudf_only.py", line 244, in <module>
+    raise SystemExit(main())
+  File "C:\Users\spost\Desktop\AI_CTA_Stroke-main\scripts\run_cardiac_ct_explorer_nudf_only.py", line 237, in main
+    raise FileNotFoundError(f"Expected LAA output not found: {default_laa}")
+FileNotFoundError: Expected LAA output not found: C:\Users\spost\Desktop\CT_image\daylightbids\derivatives\nudf_la\sub-102\cardiac_ct_explorer\sub-102_acq-CTA_ct_defaced\segmentations\laa_nudf_label.nii.gz
+
+
+SUCCESS: sub-547 (297s)
+SUCCESS: sub-657 (289s)
+SUCCESS: sub-658 (319s)
+SUCCESS: sub-659 (367s)
+SUCCESS: sub-663 (304s)
+SUCCESS: sub-664 (252s)
+SUCCESS: sub-666 (267s)
+SUCCESS: sub-669 (319s)
+SUCCESS: sub-670 (318s)
+SUCCESS: sub-673 (280s)
+SUCCESS: sub-674 (353s)
+SUCCESS: sub-676 (368s)
+SUCCESS: sub-677 (341s)
+FAILED: sub-680
+ain\scripts\run_cardiac_ct_explorer_nudf_only.py", line 244, in <module>
+    raise SystemExit(main())
+  File "C:\Users\spost\Desktop\AI_CTA_Stroke-main\scripts\run_cardiac_ct_explorer_nudf_only.py", line 237, in main
+    raise FileNotFoundError(f"Expected LAA output not found: {default_laa}")
+FileNotFoundError: Expected LAA output not found: C:\Users\spost\Desktop\CT_image\daylightbids\derivatives\nudf_la\sub-680\cardiac_ct_explorer\sub-680_acq-CTA_ct_defaced\segmentations\laa_nudf_label.nii.gz
+
+
+SUCCESS: sub-685 (228s)
+SUCCESS: sub-686 (189s)
+SUCCESS: sub-690 (195s)
+SUCCESS: sub-694 (193s)
+SUCCESS: sub-695 (205s)
+SUCCESS: sub-696 (153s)
+SUCCESS: sub-697 (195s)
+SUCCESS: sub-698 (199s)
+SUCCESS: sub-700 (190s)
+SUCCESS: sub-701 (194s)
+SUCCESS: sub-702 (198s)
+SUCCESS: sub-706 (222s)
+SUCCESS: sub-707 (232s)
+SUCCESS: sub-710 (233s)
+SUCCESS: sub-713 (263s)
+SUCCESS: sub-714 (240s)
+SUCCESS: sub-716 (234s)
+SUCCESS: sub-719 (246s)
+SUCCESS: sub-723 (277s)
+SUCCESS: sub-725 (221s)
+SUCCESS: sub-727 (236s)
+SUCCESS: sub-729 (217s)
+SUCCESS: sub-730 (218s)
+SUCCESS: sub-731 (203s)
+SUCCESS: sub-732 (206s)
+SUCCESS: sub-734 (226s)
+SUCCESS: sub-736 (243s)
+SUCCESS: sub-737 (237s)
+SUCCESS: sub-740 (236s)
+SUCCESS: sub-741 (228s)
+SUCCESS: sub-743 (242s)
+SUCCESS: sub-744 (248s)
+SUCCESS: sub-747 (236s)
+SUCCESS: sub-748 (240s)
+SUCCESS: sub-751 (261s)
+SUCCESS: sub-752 (247s)
+SUCCESS: sub-753 (239s)
+SUCCESS: sub-754 (190s)
+SUCCESS: sub-756 (228s)
+SUCCESS: sub-758 (225s)
+SUCCESS: sub-766 (214s)
+SUCCESS: sub-769 (209s)
+SUCCESS: sub-771 (224s)
+FAILED: sub-777
+ain\scripts\run_cardiac_ct_explorer_nudf_only.py", line 244, in <module>
+    raise SystemExit(main())
+  File "C:\Users\spost\Desktop\AI_CTA_Stroke-main\scripts\run_cardiac_ct_explorer_nudf_only.py", line 237, in main
+    raise FileNotFoundError(f"Expected LAA output not found: {default_laa}")
+FileNotFoundError: Expected LAA output not found: C:\Users\spost\Desktop\CT_image\daylightbids\derivatives\nudf_la\sub-777\cardiac_ct_explorer\sub-777_acq-CTA_ct_defaced\segmentations\laa_nudf_label.nii.gz
+
+
+SUCCESS: sub-778 (231s)
+SUCCESS: sub-780 (220s)
+SUCCESS: sub-781 (211s)
+SUCCESS: sub-783 (220s)
+SUCCESS: sub-788 (248s)
+SUCCESS: sub-791 (209s)
+SUCCESS: sub-792 (215s)
+SUCCESS: sub-793 (212s)
+SUCCESS: sub-794 (229s)
+SUCCESS: sub-796 (209s)
+SUCCESS: sub-797 (228s)
+SUCCESS: sub-799 (201s)
+SUCCESS: sub-800 (254s)
+SUCCESS: sub-801 (213s)
+SUCCESS: sub-804 (234s)
+SUCCESS: sub-806 (237s)
+SUCCESS: sub-807 (213s)
+SUCCESS: sub-809 (221s)
+SUCCESS: sub-811 (228s)
+SUCCESS: sub-813 (220s)
+SUCCESS: sub-814 (198s)
+FAILED: sub-816
+ain\scripts\run_cardiac_ct_explorer_nudf_only.py", line 244, in <module>
+    raise SystemExit(main())
+  File "C:\Users\spost\Desktop\AI_CTA_Stroke-main\scripts\run_cardiac_ct_explorer_nudf_only.py", line 237, in main
+    raise FileNotFoundError(f"Expected LAA output not found: {default_laa}")
+FileNotFoundError: Expected LAA output not found: C:\Users\spost\Desktop\CT_image\daylightbids\derivatives\nudf_la\sub-816\cardiac_ct_explorer\sub-816_acq-CTA_ct_defaced\segmentations\laa_nudf_label.nii.gz
+
+
+SUCCESS: sub-819 (199s)
+SUCCESS: sub-821 (228s)
+SUCCESS: sub-822 (259s)
+SUCCESS: sub-825 (244s)
+SUCCESS: sub-830 (221s)
+
+Batch finished: 2026-03-10 21:58:14.321953
+Success: 83/87
+Failed: ['sub-102', 'sub-680', 'sub-777', 'sub-816']

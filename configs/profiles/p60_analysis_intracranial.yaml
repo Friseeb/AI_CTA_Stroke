@@ -1,0 +1,12 @@
+profile_id: p60_analysis_intracranial
+stage: analysis
+roi_groups: [intracranial]
+modules:
+  radiomics: true
+  shape: false
+  calcium_score: false
+  atheroburden: false
+  tortuosity: true
+products:
+  - intracranial_radiomics_csv
+  - intracranial_tortuosity_csv

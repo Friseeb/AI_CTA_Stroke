@@ -1,0 +1,15 @@
+name: topcow_claim
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - git
+  - pip:
+      - ultralytics
+      - opencv-python
+      - SimpleITK
+      - batchgenerators
+      - nibabel
+      - numpy
+      - scipy
