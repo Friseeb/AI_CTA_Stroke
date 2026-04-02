@@ -86,6 +86,14 @@ def _parse_args() -> argparse.Namespace:
         default=20,
         help="Skip ROIs with fewer than this many non-zero voxels.",
     )
+    p.add_argument(
+        "--no-resample",
+        action="store_true",
+        help=(
+            "Skip isotropic resampling entirely. Faster for first-order-only runs on large volumes "
+            "(1500+ slice eCTA). Not recommended when texture features are included."
+        ),
+    )
     p.add_argument("--disable-diagnostics", action="store_true", help="Drop diagnostic_* fields")
     p.add_argument("--limit", type=int, default=None, help="Limit rows")
     p.add_argument("--progress", action="store_true", help="Show progress bar")
@@ -96,13 +104,23 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--image-types",
-        default="all",
-        help="Comma-separated image types to enable (default: all). Example: Original",
+        default="Original",
+        help="Comma-separated image types to enable (default: Original). Example: Original,LoG",
     )
     p.add_argument(
         "--feature-classes",
-        default="all",
-        help="Comma-separated feature classes to enable (default: all). Example: firstorder,shape,glcm",
+        default="firstorder",
+        help="Comma-separated feature classes to enable (default: firstorder). Example: firstorder,shape,glcm",
+    )
+    p.add_argument(
+        "--per-patient",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Pivot output to one row per patient: all three segments side-by-side "
+            "plus LAA/LA and LAA/Aorta ratios for Median, Mean, Entropy. "
+            "Use --no-per-patient to keep one row per (case, segment)."
+        ),
     )
     p.add_argument(
         "--fast",
@@ -168,6 +186,7 @@ def _build_extractor(
     feature_classes: str,
     fast: bool,
     ibsi_preset: bool,
+    no_resample: bool = False,
 ):
     from radiomics import featureextractor
 
@@ -178,15 +197,19 @@ def _build_extractor(
         print("IBSI preset active: ignoring --smoothing-sigma to keep Original-only extraction.")
         smoothing_sigma = 0.0
 
+    if no_resample:
+        print(f"[radiomics] --no-resample: skipping isotropic resampling (spacing={spacing} ignored).")
+
     settings = {
         "binWidth": float(binwidth),
-        "resampledPixelSpacing": spacing,
         "interpolator": interpolator,
         "normalize": False,
         "correctMask": bool(correct_mask),
         "preCrop": bool(pre_crop),
         "verbose": False,
     }
+    if not no_resample:
+        settings["resampledPixelSpacing"] = spacing
     if geometry_tolerance is not None:
         settings["geometryTolerance"] = float(geometry_tolerance)
     if resegment_range is not None:
@@ -222,7 +245,8 @@ def _build_extractor(
 
     extraction_plan = {
         "binWidth": float(binwidth),
-        "resampledPixelSpacing": spacing,
+        "resampledPixelSpacing": None if no_resample else spacing,
+        "noResample": bool(no_resample),
         "interpolator": interpolator,
         "normalize": False,
         "correctMask": bool(correct_mask),
@@ -247,6 +271,8 @@ def _run_case(
     disable_diagnostics: bool,
     min_voxels: int,
 ) -> Dict[str, str] | None:
+    import time
+
     import numpy as np
     import SimpleITK as sitk
 
@@ -276,7 +302,10 @@ def _run_case(
     else:
         mask = mask_image
 
+    print(f"  -> resampling + extracting {segment_name} ...", flush=True)
+    t0 = time.time()
     result = extractor.execute(image, mask, label=1)
+    print(f"  -> done in {time.time() - t0:.1f}s", flush=True)
 
     row: Dict[str, str] = {
         "case_id": case_id,
@@ -290,6 +319,99 @@ def _run_case(
             continue
         row[k] = str(v)
     return row
+
+
+_LAA_MIN_VOXELS     = 1_000
+_LAA_MAX_COMPONENTS = 3
+
+
+def _check_laa_quality(mask_path: Path) -> str | None:
+    """Return skip status if LAA mask fails QC, else None.
+
+    Checks (in order):
+      1. Fewer than 1 000 non-zero voxels  → "skip_small_laa"
+      2. More than 3 connected components  → "skip_fragmented_laa"
+    """
+    import numpy as np
+    import SimpleITK as sitk
+    from scipy import ndimage
+
+    mask_arr = sitk.GetArrayFromImage(sitk.ReadImage(str(mask_path)))
+    mask_bin = (mask_arr > 0).astype(np.uint8)
+
+    if int(np.sum(mask_bin)) < _LAA_MIN_VOXELS:
+        return "skip_small_laa"
+
+    _, num_components = ndimage.label(mask_bin)
+    if num_components > _LAA_MAX_COMPONENTS:
+        return "skip_fragmented_laa"
+
+    return None
+
+
+def _pivot_to_per_patient(rows: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Pivot per-segment rows to one row per patient; compute LAA/LA and LAA/Aorta ratios."""
+    _RATIO_FEATS = [
+        ("Median",  "median"),
+        ("Mean",    "mean"),
+        ("Entropy", "entropy"),
+    ]
+    # Group by case_id → {seg: row}
+    by_case: Dict[str, Dict[str, Dict[str, str]]] = {}
+    ct_types: Dict[str, str] = {}
+    sub_ids:  Dict[str, str] = {}
+    for row in rows:
+        cid = row["case_id"]
+        seg = row["segment"]  # "laa", "la", "aorta"
+        by_case.setdefault(cid, {})
+        by_case[cid][seg] = row
+        ct_types.setdefault(cid, row.get("ct_type", ""))
+        sub_ids.setdefault(cid, row.get("sub_id", cid.split("_acq-")[0]))
+
+    out_rows: List[Dict[str, str]] = []
+    for cid in sorted(by_case):
+        segs = by_case[cid]
+        if not all(s in segs for s in ("laa", "la", "aorta")):
+            missing = [s for s in ("laa", "la", "aorta") if s not in segs]
+            print(f"⚠ {cid}: skipping pivot — missing segments: {', '.join(missing)}")
+            continue
+
+        patient_row: Dict[str, str] = {
+            "sub_id":  sub_ids.get(cid, cid.split("_acq-")[0]),
+            "case_id": cid,
+            "ct_type": ct_types.get(cid, ""),
+        }
+        for seg in ("laa", "la", "aorta"):
+            for k, v in segs[seg].items():
+                if k in ("case_id", "sub_id", "segment", "ct_type"):
+                    continue
+                patient_row[f"{seg}_{k}"] = v
+
+        # Compute ratios
+        laa_r = segs["laa"]
+        la_r  = segs["la"]
+        ao_r  = segs["aorta"]
+        for feat_key, feat_slug in _RATIO_FEATS:
+            col      = f"original_firstorder_{feat_key}"
+            laa_val  = laa_r.get(col, "")
+            la_val   = la_r.get(col,  "")
+            ao_val   = ao_r.get(col,  "")
+            for ratio_col, ref_val in [
+                (f"ratio_laa_la_{feat_slug}",    la_val),
+                (f"ratio_laa_aorta_{feat_slug}", ao_val),
+            ]:
+                try:
+                    patient_row[ratio_col] = str(float(laa_val) / float(ref_val))
+                except (ValueError, ZeroDivisionError):
+                    patient_row[ratio_col] = ""
+            try:
+                patient_row[f"ratio_la_aorta_{feat_slug}"] = str(float(la_val) / float(ao_val))
+            except (ValueError, ZeroDivisionError):
+                patient_row[f"ratio_la_aorta_{feat_slug}"] = ""
+
+        out_rows.append(patient_row)
+
+    return out_rows
 
 
 def main() -> int:
@@ -314,6 +436,7 @@ def main() -> int:
         args.feature_classes,
         args.fast,
         args.ibsi_preset,
+        no_resample=args.no_resample,
     )
 
     tasks = []
@@ -322,7 +445,9 @@ def main() -> int:
         for idx, row in enumerate(reader):
             if args.limit is not None and idx >= args.limit:
                 break
-            case_id = row.get(args.id_field, "").strip()
+            case_id  = row.get(args.id_field, "").strip()
+            ct_type  = row.get("ct_type", "").strip()
+            sub_id   = row.get("sub_id", case_id.split("_acq-")[0]).strip()
             cta_path = Path(row.get(args.cta_field, "").strip())
             if not case_id or not cta_path.exists():
                 continue
@@ -338,7 +463,7 @@ def main() -> int:
                 mask_path = Path(mask_path_str)
                 if not mask_path.exists():
                     continue
-                tasks.append((case_id, cta_path, seg_name, mask_path))
+                tasks.append((case_id, sub_id, ct_type, cta_path, seg_name, mask_path))
 
     if not tasks:
         print("No valid tasks found; check manifest paths.")
@@ -355,7 +480,25 @@ def main() -> int:
             print("tqdm not available; falling back to basic progress.")
 
     rows: List[Dict[str, str]] = []
-    for i, (case_id, cta_path, seg_name, mask_path) in enumerate(iterator, start=1):
+    for i, (case_id, sub_id, ct_type, cta_path, seg_name, mask_path) in enumerate(iterator, start=1):
+        print(f"[{i}/{len(tasks)}] {sub_id} | {ct_type} | segment: {seg_name}", flush=True)
+        # LAA-specific QC checks — run before PyRadiomics
+        if seg_name == "laa":
+            skip_status = _check_laa_quality(mask_path)
+            if skip_status:
+                print(f"⚠ {case_id} / laa: {skip_status} ({mask_path.name})")
+                rows.append({
+                    "case_id":    case_id,
+                    "sub_id":     sub_id,
+                    "ct_type":    ct_type,
+                    "segment":    seg_name,
+                    "cta_path":   str(cta_path),
+                    "mask_path":  str(mask_path),
+                    "roi_voxels": "",
+                    "status":     skip_status,
+                })
+                continue
+
         result = _run_case(
             extractor=extractor,
             case_id=case_id,
@@ -366,6 +509,8 @@ def main() -> int:
             min_voxels=args.min_voxels,
         )
         if result is not None:
+            result["sub_id"]  = sub_id
+            result["ct_type"] = ct_type
             rows.append(result)
         if args.progress and "tqdm" not in str(type(iterator)) and i % 25 == 0:
             print(f"Processed {i}/{len(tasks)} segmentations...")
@@ -374,10 +519,27 @@ def main() -> int:
         print("No rows produced; check manifest paths.")
         return 1
 
+    # Pivot to per-patient rows (with ratios) if requested
+    if args.per_patient:
+        rows = _pivot_to_per_patient(rows)
+        if not rows:
+            print("No complete cases (laa + la + aorta all present); check manifest paths.")
+            return 1
+
     # Write CSV
     output_csv = Path(args.output_csv)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames = sorted(rows[0].keys())
+
+    if args.per_patient:
+        all_keys = set()
+        for r in rows:
+            all_keys.update(r.keys())
+        priority = [k for k in ("sub_id", "case_id", "ct_type") if k in all_keys]
+        ratios   = sorted(k for k in all_keys if k.startswith("ratio_"))
+        rest     = sorted(k for k in all_keys if k not in priority and k not in ratios)
+        fieldnames = priority + rest + ratios
+    else:
+        fieldnames = sorted(rows[0].keys())
     with output_csv.open("w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()

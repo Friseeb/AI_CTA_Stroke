@@ -42,8 +42,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+import shutil
+
 import pydicom
 import SimpleITK as sitk
+from tqdm import tqdm
 
 warnings.filterwarnings(
     "ignore",
@@ -126,14 +129,14 @@ SCAN_TYPE_CONFIGS: List[ScanTypeConfig] = [
         multi_phase=True,
         study_desc_keywords=(
             "cardiac", "heart", "coronary", "ccta", "calcium", "cac",
-            "cardio", "ctheart", "aortic",
+            "cardio", "ctheart", "aortic", "tavi",
         ),
         protocol_keywords=(
             "cardiac", "heart", "coronary", "ccta", "cac", "cardio",
         ),
         study_body_parts=("heart", "cardiac", "coronary"),
-        z_coverage_min_mm=80.0,
-        z_coverage_max_mm=300.0,
+        z_coverage_min_mm=70.0,
+        z_coverage_max_mm=400.0,
         min_mb=10.0,
         max_mb=700.0,
         min_source_slices=50,
@@ -200,7 +203,7 @@ SCAN_TYPE_CONFIGS: List[ScanTypeConfig] = [
             "abdomen", "abdo", "liver", "pelvis", "abdopelv",
         ),
         z_coverage_min_mm=200.0,
-        z_coverage_max_mm=700.0,
+        z_coverage_max_mm=750.0,
         min_mb=30.0,
         max_mb=1200.0,
     ),
@@ -288,6 +291,7 @@ def collect_series(export_dir: Path) -> Dict[str, SeriesCandidate]:
                     "PatientPosition",
                     "PatientSex",
                     "PatientBirthDate",
+                    "StudyDate",
                 ],
             )
         except Exception:
@@ -315,6 +319,7 @@ def collect_series(export_dir: Path) -> Dict[str, SeriesCandidate]:
                 "patient_position":   safe_text(getattr(ds, "PatientPosition", None)),
                 "patient_sex":        safe_text(getattr(ds, "PatientSex", None)),
                 "patient_birth_date": safe_text(getattr(ds, "PatientBirthDate", None)),
+                "study_date":         safe_text(getattr(ds, "StudyDate", None)),
             }
 
     return {
@@ -413,7 +418,14 @@ def classify_export_study(
             if cfg.z_coverage_min_mm is not None and coverage_mm < cfg.z_coverage_min_mm:
                 scores[type_name] = 0
                 continue
-            if cfg.z_coverage_max_mm is not None and coverage_mm > cfg.z_coverage_max_mm:
+            # TAVI protocols cover heart + full aorta + iliofemoral vessels,
+            # so z can exceed CardiacCT's normal upper bound — skip z_max for
+            # CardiacCT when "tavi" appears in either study description or
+            # protocol name (sub-194 has "tavi" only in ProtocolName).
+            skip_z_max = type_name == "CardiacCT" and (
+                "tavi" in study_descs or "tavi" in proto_names
+            )
+            if not skip_z_max and cfg.z_coverage_max_mm is not None and coverage_mm > cfg.z_coverage_max_mm:
                 scores[type_name] = 0
                 continue
 
@@ -639,6 +651,7 @@ def _convert_one_series(
     phase_idx: Optional[int],
     min_mb: float,
     max_mb: float,
+    rejected_root: Optional[Path] = None,
 ) -> ConvertedSeries:
     tmp = out_path.parent / f".tmp_{out_path.name}"
     if tmp.exists():
@@ -648,14 +661,22 @@ def _convert_one_series(
         _convert_to_nifti(ordered, tmp)
         mb = output_size_mb(tmp)
         if mb < min_mb or mb > max_mb:
-            tmp.unlink(missing_ok=True)
+            rej_note = ""
+            if rejected_root is not None:
+                rej_dir = rejected_root / out_path.parent.name
+                rej_dir.mkdir(parents=True, exist_ok=True)
+                rej_path = rej_dir / out_path.name
+                shutil.move(str(tmp), str(rej_path))
+                rej_note = f" → {rej_path}"
+            else:
+                tmp.unlink(missing_ok=True)
             return ConvertedSeries(
                 phase_idx=phase_idx or 0, nii_path=out_path,
                 n_slices=order_info["used_rows"],
                 series_desc=candidate.meta.get("series_description", ""),
                 series_uid=candidate.uid,
                 status="size_rejected",
-                error_message=f"{mb:.1f} MB outside [{min_mb:.0f}, {max_mb:.0f}] MB",
+                error_message=f"{mb:.1f} MB outside [{min_mb:.0f}, {max_mb:.0f}] MB{rej_note}",
                 size_mb=round(mb, 1),
             )
 
@@ -676,6 +697,7 @@ def _convert_one_series(
             "ManufacturerModelName":  candidate.meta.get("model", ""),
             "PatientSex":             candidate.meta.get("patient_sex", ""),
             "PatientBirthDate":       candidate.meta.get("patient_birth_date", ""),
+            "StudyDate":              candidate.meta.get("study_date", ""),
             "SeriesInstanceUID":      candidate.uid,
             "SourceFileCountRaw":     order_info["raw_rows"],
             "SourceFileCountUsed":    order_info["used_rows"],
@@ -715,6 +737,7 @@ def convert_export(
     min_mb: float,
     max_mb: float,
     series_map: Dict[str, SeriesCandidate],
+    rejected_root: Optional[Path] = None,
 ) -> List[ConvertedSeries]:
     """Convert one Export_* folder (already classified) into NIfTI(s)."""
 
@@ -752,6 +775,7 @@ def convert_export(
             candidate, out_path, cfg,
             phase_idx if cfg.multi_phase else None,
             min_mb, max_mb,
+            rejected_root=rejected_root,
         )
         results.append(r)
 
@@ -777,6 +801,7 @@ def process_subject(
     allowed_types: List[str],
     min_mb_override: Optional[float],
     max_mb_override: Optional[float],
+    rejected_root: Optional[Path] = None,
 ) -> Tuple[List[ConvertedSeries], dict]:
     """Process all Export_* folders for one patient."""
     export_dirs = find_export_dirs(subject_dir)
@@ -843,13 +868,18 @@ def process_subject(
         # Only create the subfolder if we have something to write.
         sub_dir.mkdir(parents=True, exist_ok=True)
 
-        results = convert_export(sid, export_dir, sub_dir, cfg, min_mb, max_mb, series_map)
+        results = convert_export(sid, export_dir, sub_dir, cfg, min_mb, max_mb, series_map,
+                                  rejected_root=rejected_root)
         all_results.extend(results)
 
         # Accumulate manifest columns for this type.
         label = cfg.acq_label
         converted = [r for r in results if r.status == "converted"]
         skipped   = [r for r in results if r.status == "skip_exists"]
+
+        # StudyDate from DICOM (YYYYMMDD) — same for all series in the export.
+        first_meta = next(iter(series_map.values())).meta if series_map else {}
+        manifest_row[f"{label}_study_date"] = first_meta.get("study_date", "")
 
         if skipped and not converted:
             existing_files = (
@@ -897,8 +927,14 @@ def _write_html_report(
     src_root: str,
     out_root: str,
     report_path: "Path",
+    summary_mode: bool = False,
 ) -> None:
-    """Write a self-contained HTML summary of the conversion run."""
+    """Write a self-contained HTML summary of the conversion run.
+
+    summary_mode: when True, both "converted" and "skip_exists" badges are
+    shown as green "available" so non-technical readers find the report
+    more intuitive.  All other content (filters, details, JS) is identical.
+    """
 
     active_cfgs = [c for c in scan_type_configs if c.name in allowed_types]
     labels = [c.acq_label for c in active_cfgs]
@@ -919,9 +955,15 @@ def _write_html_report(
         "ctabdomen": "ctabdomen",
     }
 
-    # Tally summary counts.
+    # Separate special annotation rows (already_exists, duplicate_source) from
+    # the main manifest so they are rendered in a dedicated notes section below
+    # the table and do not interfere with JS filtering.
+    normal_rows  = [r for r in manifest_rows if not r.get("_row_type")]
+    special_rows = [r for r in manifest_rows if r.get("_row_type")]
+
+    # Tally summary counts (normal rows only).
     totals: Dict[str, Counter] = {lbl: Counter() for lbl in labels}
-    for row in manifest_rows:
+    for row in normal_rows:
         for lbl in labels:
             st = row.get(f"{lbl}_status", "")
             if st:
@@ -933,6 +975,9 @@ def _write_html_report(
         "size_rejected":("badge-warn", "size rejected"),
         "error":        ("badge-err",  "error"),
     }
+    if summary_mode:
+        badge_css["converted"]  = ("badge-ok", "available")
+        badge_css["skip_exists"] = ("badge-ok", "available")
 
     def badge(status: str, detail: str = "") -> str:
         css, label = badge_css.get(status, ("badge-unk", status or "—"))
@@ -942,10 +987,10 @@ def _write_html_report(
     def esc(s) -> str:
         return (str(s) if s is not None else "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    # Build table rows.
+    # Build table rows (normal rows only — special rows rendered separately below).
     rows_html = []
     row_type_counts: Counter = Counter()
-    for row in manifest_rows:
+    for row in normal_rows:
         sid = row.get("subject_id", "")
         cells = [f"<td><b>sub-{esc(sid)}</b></td>"]
         _n_exp         = row.get("n_exports_found", "")
@@ -990,7 +1035,7 @@ def _write_html_report(
             detail = err or fnames
             b = badge(st, detail)
             extra = ""
-            if st in ("converted", "skip_exists"):
+            if st in ("converted", "skip_exists") and not summary_mode:
                 parts = []
                 if phases:
                     parts.append(f"{phases} ph")
@@ -1041,17 +1086,27 @@ def _write_html_report(
         skip = t.get("skip_exists", 0)
         warn = t.get("size_rejected", 0)
         err  = t.get("error", 0)
-        cards.append(
-            f'<div class="card"><b>{DISPLAY_NAMES.get(lbl, lbl)}</b>'
-            f'<br><span class="badge-ok">{ok} converted</span>'
-            f'<br><span class="badge-skip">{skip} skipped</span>'
-            f'<br><span class="badge-warn">{warn} size-rej</span>'
-            f'<br><span class="badge-err">{err} errors</span>'
-            f'</div>'
-        )
+        if summary_mode:
+            available = ok + skip
+            cards.append(
+                f'<div class="card"><b>{DISPLAY_NAMES.get(lbl, lbl)}</b>'
+                f'<br><span class="badge-ok">{available} available</span>'
+                f'<br><span class="badge-warn">{warn} size-rej</span>'
+                f'<br><span class="badge-err">{err} errors</span>'
+                f'</div>'
+            )
+        else:
+            cards.append(
+                f'<div class="card"><b>{DISPLAY_NAMES.get(lbl, lbl)}</b>'
+                f'<br><span class="badge-ok">{ok} converted</span>'
+                f'<br><span class="badge-skip">{skip} skipped</span>'
+                f'<br><span class="badge-warn">{warn} size-rej</span>'
+                f'<br><span class="badge-err">{err} errors</span>'
+                f'</div>'
+            )
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    n_subj = len(manifest_rows)
+    n_subj = len(normal_rows)
 
     # Build checkbox filter rows — one per CT type, four state checkboxes + visible count cell.
     # Checkboxes start CHECKED; unchecking EXCLUDES patients with that CT type + state.
@@ -1091,6 +1146,49 @@ def _write_html_report(
         f'"label":"{DISPLAY_NAMES.get(cfg.acq_label, cfg.acq_label)}"}}'
         for cfg in active_cfgs
     ) + "]"
+
+    # ── Build notes section for special rows ────────────────────────────────────
+    already_exists_rows = [r for r in special_rows if r.get("_row_type") == "already_exists"]
+    dup_source_rows     = [r for r in special_rows if r.get("_row_type") == "duplicate_source"]
+
+    _notes_parts = []
+    if already_exists_rows:
+        _ae_rows = "".join(
+            f'<tr class="note-already-exists">'
+            f'<td><b>sub-{esc(r.get("subject_id",""))}</b></td>'
+            f'<td><span class="badge-skip">already exists</span></td>'
+            f'<td><small>{esc(r.get("_note",""))}</small></td>'
+            f'</tr>'
+            for r in sorted(already_exists_rows, key=lambda r: int(r.get("subject_id") or 0))
+        )
+        _notes_parts.append(
+            f'<h3 style="font-size:13px;color:#555;margin:12px 0 6px 0;">'
+            f'Already converted ({len(already_exists_rows)}) — skipped</h3>'
+            f'<table class="notes-table">'
+            f'<thead><tr><th>Subject</th><th>Status</th><th>Path</th></tr></thead>'
+            f'<tbody>{_ae_rows}</tbody></table>'
+        )
+    if dup_source_rows:
+        _ds_rows = "".join(
+            f'<tr class="note-dup-source">'
+            f'<td><b>sub-{esc(r.get("subject_id",""))}</b></td>'
+            f'<td><span class="badge-warn">duplicate source</span></td>'
+            f'<td><small>{esc(r.get("_note",""))}</small></td>'
+            f'</tr>'
+            for r in sorted(dup_source_rows, key=lambda r: int(r.get("subject_id") or 0))
+        )
+        _notes_parts.append(
+            f'<h3 style="font-size:13px;color:#555;margin:12px 0 6px 0;">'
+            f'Duplicate source folders ({len(dup_source_rows)}) — auto-resolved by file count</h3>'
+            f'<table class="notes-table">'
+            f'<thead><tr><th>Subject</th><th>Status</th><th>Details</th></tr></thead>'
+            f'<tbody>{_ds_rows}</tbody></table>'
+        )
+
+    notes_section_html = (
+        f'<div class="notes-section"><h2>Notes</h2>{"".join(_notes_parts)}</div>'
+        if _notes_parts else ""
+    )
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1162,6 +1260,14 @@ def _write_html_report(
   .row-unprocessed td:first-child {{border-left:4px solid #e65100;}}
   small {{font-size:11px;}}
   tr.hidden {{display:none;}}
+  /* ── Notes section (already_exists / duplicate_source) ── */
+  .notes-section {{margin-top:24px;}}
+  .notes-section h2 {{font-size:14px;color:#444;margin-bottom:8px;}}
+  .notes-table {{border-collapse:collapse;width:100%;font-size:12px;}}
+  .notes-table th {{background:#eee;padding:5px 10px;text-align:left;border:1px solid #ccc;}}
+  .notes-table td {{padding:4px 10px;border:1px solid #ccc;vertical-align:top;}}
+  .notes-table tr.note-already-exists td {{background:#f5f5f5;color:#666;}}
+  .notes-table tr.note-dup-source td {{background:#fff8e1;}}
 </style>
 </head>
 <body>
@@ -1347,6 +1453,7 @@ def _write_html_report(
 
   document.addEventListener('DOMContentLoaded', initCounts);
 </script>
+{notes_section_html}
 </body>
 </html>
 """
@@ -1381,6 +1488,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--min-mb", type=float, default=None)
     p.add_argument("--max-mb", type=float, default=None)
     p.add_argument(
+        "--rejected-root",
+        default=r"C:\Users\spost\Desktop\CT_image\SLAAOBIDS\REJECTED",
+        help="Directory where size-rejected NIfTI files are saved as sub-XXX/<filename>.nii.gz",
+    )
+    p.add_argument(
         "--subject", action="append", default=[],
         help="Restrict to subject id(s); repeatable, e.g. --subject 224",
     )
@@ -1398,6 +1510,7 @@ def _process_subject_worker(
     allowed_types: List[str],
     min_mb_override: Optional[float],
     max_mb_override: Optional[float],
+    rejected_root: Optional[Path] = None,
 ) -> Tuple[List[ConvertedSeries], dict, str]:
     """Top-level worker for ProcessPoolExecutor (must be picklable on Windows)."""
     buf = io.StringIO()
@@ -1412,6 +1525,7 @@ def _process_subject_worker(
             allowed_types=allowed_types,
             min_mb_override=min_mb_override,
             max_mb_override=max_mb_override,
+            rejected_root=rejected_root,
         )
     finally:
         sys.stdout = old_stdout
@@ -1422,49 +1536,105 @@ def main() -> int:
     args = parse_args()
     src_root = Path(args.src_root)
     out_root = Path(args.out_root)
+    rejected_root = Path(args.rejected_root) if args.rejected_root else None
 
     subject_dirs = sorted(
-        [p for p in src_root.iterdir() if p.is_dir() and not p.name.startswith("$")],
-        key=lambda p: int(subject_id_from_name(p.name)) if subject_id_from_name(p.name).isdigit() else float("inf"),
+        [p for p in src_root.iterdir() if p.is_dir() and not p.name.startswith(("$", "."))],
+        # Primary: numeric subject id; secondary: plain numeric names first so
+        # "557" beats "Folder 557" if both resolve to the same id.
+        key=lambda p: (
+            int(subject_id_from_name(p.name)) if subject_id_from_name(p.name).isdigit() else float("inf"),
+            0 if p.name.isdigit() else 1,
+        ),
     )
     wanted = {str(int(s)) for s in args.subject if str(s).isdigit()}
 
     print(f"Scan types : {args.scan_types}")
     print(f"Source     : {src_root}")
     print(f"Output     : {out_root}")
+    print(f"Rejected   : {rejected_root or '(discard)'}")
     print(f"Subjects   : {len(subject_dirs)} directories found")
     print(f"Workers    : {args.workers}")
     print()
 
     run_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    manifest_path = out_root / f"conversion_manifest_{run_ts}.csv"
+    report_dir = out_root / "conversion Report"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = report_dir / f"conversion_manifest_{run_ts}.csv"
     out_root.mkdir(parents=True, exist_ok=True)
 
     all_manifest_rows: List[dict] = []
     counts: Counter = Counter()
 
-    # Build list of subjects to process
-    work_items = []
+    # ── Resolve duplicate source folders by file count ──────────────────────────
+    # Group all source dirs by numeric sid, then pick the dir with the most files.
+    sid_to_dirs: Dict[str, List[Path]] = defaultdict(list)
     for subj in subject_dirs:
         sid = subject_id_from_name(subj.name)
         if not sid.isdigit():
             continue
         if wanted and sid not in wanted:
             continue
-        work_items.append((sid, subj))
+        sid_to_dirs[sid].append(subj)
+
+    def _count_files_fast(d: Path) -> int:
+        """Quick recursive file count (no DICOM parsing) for duplicate ranking."""
+        return sum(
+            1 for p in d.rglob("*")
+            if p.is_file() and p.name.upper() != "DICOMDIR"
+            and not any(part in SKIP_DIRS for part in p.parts)
+        )
+
+    work_items: List[Tuple[str, Path]] = []
+    for sid in sorted(sid_to_dirs, key=lambda s: int(s)):
+        dirs = sid_to_dirs[sid]
+        if len(dirs) == 1:
+            work_items.append((sid, dirs[0]))
+        else:
+            counted = [(d, _count_files_fast(d)) for d in dirs]
+            counted.sort(key=lambda x: -x[1])
+            best_dir, best_count = counted[0]
+            work_items.append((sid, best_dir))
+            for dup_dir, dup_count in counted[1:]:
+                note = (f"Dropped: {dup_dir.name} ({dup_count} files); "
+                        f"Kept: {best_dir.name} ({best_count} files)")
+                print(f"[dup_source] sub-{sid}: {note}")
+                all_manifest_rows.append({
+                    "subject_id": sid,
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "_row_type": "duplicate_source",
+                    "_note": note,
+                })
+
+    # ── Skip already-converted subjects ─────────────────────────────────────────
+    # If sub-{sid} already exists in out_root with at least one .nii.gz, skip.
+    final_work_items: List[Tuple[str, Path]] = []
+    for sid, subj in work_items:
+        sub_dir = out_root / f"sub-{sid}"
+        if sub_dir.exists() and any(f for f in sub_dir.glob("*.nii.gz") if not f.name.startswith(".")):
+            print(f"[already_exists] sub-{sid} — already in {out_root}")
+            all_manifest_rows.append({
+                "subject_id": sid,
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "_row_type": "already_exists",
+                "_note": str(sub_dir),
+            })
+        else:
+            final_work_items.append((sid, subj))
 
     futures_map: dict = {}
     with concurrent.futures.ProcessPoolExecutor(max_workers=args.workers) as executor:
-        for sid, subj in work_items:
+        for sid, subj in final_work_items:
             export_dirs = find_export_dirs(subj)
             print(f"[sub-{sid}]  {len(export_dirs)} export folder(s)  → queued")
             fut = executor.submit(
                 _process_subject_worker,
                 sid, subj, out_root, args.scan_types, args.min_mb, args.max_mb,
+                rejected_root,
             )
             futures_map[fut] = sid
 
-        for fut in concurrent.futures.as_completed(futures_map):
+        for fut in tqdm(concurrent.futures.as_completed(futures_map), total=len(futures_map), desc="Converting", unit="subject", dynamic_ncols=True):
             sid = futures_map[fut]
             try:
                 results, manifest_row, log_output = fut.result()
@@ -1506,19 +1676,32 @@ def main() -> int:
         writer.writeheader()
         writer.writerows(all_manifest_rows)
 
-    report_path = out_root / f"conversion_report_{run_ts}.html"
+    qc_report_path = report_dir / f"conversion_report_QC_{run_ts}.html"
     _write_html_report(
         manifest_rows=all_manifest_rows,
         scan_type_configs=SCAN_TYPE_CONFIGS,
         allowed_types=args.scan_types,
         src_root=str(src_root),
         out_root=str(out_root),
-        report_path=report_path,
+        report_path=qc_report_path,
+    )
+
+    summary_report_path = report_dir / f"conversion_report_summary_{run_ts}.html"
+    _write_html_report(
+        manifest_rows=all_manifest_rows,
+        scan_type_configs=SCAN_TYPE_CONFIGS,
+        allowed_types=args.scan_types,
+        src_root=str(src_root),
+        out_root=str(out_root),
+        report_path=summary_report_path,
+        summary_mode=True,
     )
 
     print()
     print("---")
-    print(f"Manifest : {manifest_path}")
+    print(f"Manifest     : {manifest_path}")
+    print(f"Report QC    : {qc_report_path}")
+    print(f"Report summ  : {summary_report_path}")
     print("Counts   :", dict(sorted(counts.items())))
     return 0
 

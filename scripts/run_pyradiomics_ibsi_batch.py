@@ -139,7 +139,7 @@ def _parse_args() -> argparse.Namespace:
         default=True,
         help="Drop diagnostic_* keys from final CSV",
     )
-    p.add_argument("--save-preprocessed", action="store_true", help="Save preprocessed image/mask NIfTIs")
+    p.add_argument("--save-preprocessed", action="store_true", default=True, help="Save preprocessed image/mask NIfTIs")
     p.add_argument(
         "--preprocessed-dir",
         default=None,
@@ -461,6 +461,7 @@ def main() -> int:
             "mask_path": str(item.mask_path),
             "status": "pending",
             "error": "",
+            "qc_flag": "",
             "isotropic_mm": args.isotropic_mm,
             "bin_width": args.bin_width,
         })
@@ -508,6 +509,29 @@ def main() -> int:
                 row["status"] = "skip_small_roi"
                 rows.append(row)
                 continue
+
+            # Volumetric QC filters — applied to interpolated mask volume (1 vox = 1 mm³ after 1×1×1 resampling)
+            region_lower = item.region.lower()
+            qc_flag = ""
+            if "laa" in region_lower:
+                if roi_vox < 1000:
+                    if not (args.resume and existing_row is not None and str(existing_row.get("status", "")).lower() == "success"):
+                        row["status"] = "laa_segmentation_failure"
+                        row["qc_flag"] = qc_flag
+                        rows.append(row)
+                    continue
+                elif roi_vox <= 5000:
+                    qc_flag = "laa_small"
+            elif "left_atrium" in region_lower:
+                if roi_vox < 10000:
+                    if not (args.resume and existing_row is not None and str(existing_row.get("status", "")).lower() == "success"):
+                        row["status"] = "la_segmentation_failure"
+                        row["qc_flag"] = qc_flag
+                        rows.append(row)
+                    continue
+                elif roi_vox <= 50000:
+                    qc_flag = "la_partial_fov"
+            row["qc_flag"] = qc_flag
 
             if args.save_preprocessed:
                 base = f"{item.case_id}_{item.region}"
@@ -560,6 +584,7 @@ def main() -> int:
         "region",
         "status",
         "error",
+        "qc_flag",
         "image_path",
         "mask_path",
         "roi_voxels_iso",
@@ -591,3 +616,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+# QC plots: run scripts/run_plots_batch.py --csv <output_csv> --outdir <plots_dir>

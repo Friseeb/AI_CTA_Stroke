@@ -59,23 +59,11 @@ def _run(
     dry_run: bool,
     check: bool = True,
     env: dict[str, str] | None = None,
-    log_path: Path | None = None,
-    quiet_subprocess: bool = False,
 ) -> int:
     print("Running:", " ".join(cmd))
     if dry_run:
         return 0
-    if quiet_subprocess:
-        if log_path is None:
-            raise ValueError("log_path is required when quiet_subprocess=True")
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        with log_path.open("a", encoding="utf-8") as lf:
-            lf.write("=== Running ===\n")
-            lf.write(" ".join(cmd) + "\n")
-            lf.flush()
-            proc = subprocess.run(cmd, env=env, stdout=lf, stderr=subprocess.STDOUT)
-    else:
-        proc = subprocess.run(cmd, env=env)
+    proc = subprocess.run(cmd, env=env)
     if check and proc.returncode != 0:
         raise subprocess.CalledProcessError(proc.returncode, cmd)
     return proc.returncode
@@ -93,9 +81,6 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--force", action="store_true", help="Recompute even if outputs exist")
     p.add_argument("--progress", dest="progress", action="store_true", default=None, help="Show tqdm progress bar")
     p.add_argument("--no-progress", dest="progress", action="store_false", help="Disable tqdm progress bar")
-    p.add_argument("--quiet-subprocess", action="store_true", help="Redirect per-case subprocess stdout/stderr to log files")
-    p.add_argument("--subprocess-log-dir", default=None, help="Directory for per-case logs (default: <out-dir>/_logs)")
-
     # NUDF / TotalSegmentator stage
     p.add_argument("--nudf-env", default="cardiac-ct-explorer", help="Conda env for NUDF stage when --nudf-python is not set")
     p.add_argument("--nudf-python", default=None, help="Python executable for NUDF stage (recommended)")
@@ -361,9 +346,7 @@ def main() -> int:
     ]
     summary_rows: list[dict[str, str]] = []
     progress_enabled = (sys.stdout.isatty() if args.progress is None else args.progress) and tqdm is not None
-    subprocess_log_dir = Path(args.subprocess_log_dir) if args.subprocess_log_dir else (out_dir / "_logs")
-    if args.quiet_subprocess and not args.dry_run:
-        subprocess_log_dir.mkdir(parents=True, exist_ok=True)
+    subprocess_log_dir = out_dir / "_logs"
 
     loop_iter = enumerate(input_files)
     if progress_enabled:
@@ -483,8 +466,6 @@ def main() -> int:
                 nudf_cmd,
                 args.dry_run,
                 check=False,
-                log_path=case_log,
-                quiet_subprocess=args.quiet_subprocess,
             )
             if rc != 0 and args.totalseg_fast:
                 disable_totalseg_fast = True
@@ -504,8 +485,6 @@ def main() -> int:
                     nudf_cmd_nofast,
                     args.dry_run,
                     check=False,
-                    log_path=case_log,
-                    quiet_subprocess=args.quiet_subprocess,
                 )
             if rc != 0 and args.retry_nudf_on_fail_cpu:
                 retried_cpu = "yes"
@@ -523,8 +502,6 @@ def main() -> int:
                     nudf_cmd_cpu,
                     args.dry_run,
                     check=False,
-                    log_path=case_log,
-                    quiet_subprocess=args.quiet_subprocess,
                 )
             if rc != 0:
                 hint, hint_corrupt = _classify_case_log_failure(case_log)
@@ -566,8 +543,6 @@ def main() -> int:
                         args.dry_run,
                         check=False,
                         env=monai_env,
-                        log_path=case_log,
-                        quiet_subprocess=args.quiet_subprocess,
                     )
                     if rc != 0 and args.monai_fallback_cpu:
                         print(f"MONAI failed on {args.monai_device}; retrying on CPU for {case_id}")
@@ -584,8 +559,6 @@ def main() -> int:
                             args.dry_run,
                             check=False,
                             env=monai_env,
-                            log_path=case_log,
-                            quiet_subprocess=args.quiet_subprocess,
                         )
                     if rc != 0:
                         raise RuntimeError(f"MONAI aorta failed for {case_id} (exit={rc})")

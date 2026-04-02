@@ -3,7 +3,19 @@
 Deface CTA scans by removing facial features using TotalSegmentator's face mask.
 
 This script anonymizes CT/CTA scans by zeroing out voxels in the face region,
-making re-identification impossible while preserving brain and vascular structures.
+making re-identification impossible while preserving sub-facial anatomy.
+
+Two defacing modes:
+
+  axial (default, recommended):
+    TotalSegmentator locates where the face begins (lowest Z slice containing
+    the face label).  All voxels in every axial slice from that Z level upward
+    are set to the fill value.  This removes soft tissue AND bone (skull, orbits,
+    mandible) — no facial features remain.
+
+  mask:
+    Only the voxels predicted by TotalSegmentator's face label are zeroed.
+    Leaves facial bones intact and is NOT sufficient for full anonymisation.
 
 Usage:
   # Using pre-computed TotalSegmentator output:
@@ -25,10 +37,9 @@ Usage:
     --run-totalseg --recursive
 
 Notes:
-- Uses TotalSegmentator's 'face' structure for precise face localization
-- Optionally dilates the face mask for more aggressive defacing
+- Uses TotalSegmentator's 'face' task for face localisation
+- Default mode 'axial' removes all anatomy above the face cutoff plane
 - Fill value can be set to air (-1024 HU), zero, or custom value
-- Preserves all non-face anatomy including vessels and brain
 """
 
 import argparse
@@ -133,7 +144,7 @@ def run_totalsegmentator(
     output_dir: Path,
     fast: bool = True,
     roi_subset: list[str] | None = None,
-    task: str = "total",
+    task: str = "face",
 ) -> Path:
     """Run TotalSegmentator to generate requested masks."""
     try:
@@ -148,15 +159,16 @@ def run_totalsegmentator(
     if roi_subset is None:
         roi_subset = ["face"]
 
-    print(f"  Running TotalSegmentator (fast={fast})...")
-    totalsegmentator(
-        input=str(input_path),
-        output=str(output_dir),
-        task=task,
-        fast=fast,
-        ml=False,  # Individual files per structure
-        roi_subset=roi_subset,  # Limit to requested structures for speed
-    )
+    # task="face" does not support fast mode or roi_subset
+    if task == "face":
+        fast = False
+        roi_subset = None
+
+    print(f"  Running TotalSegmentator (task={task}, fast={fast})...")
+    kwargs = dict(input=str(input_path), output=str(output_dir), task=task, fast=fast, ml=False)
+    if roi_subset is not None:
+        kwargs["roi_subset"] = roi_subset
+    totalsegmentator(**kwargs)
 
     return output_dir
 
