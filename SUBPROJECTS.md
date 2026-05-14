@@ -10,7 +10,15 @@ Primary workflow documentation lives in `README.md`.
 - `analysis`: `subprojects/analysis/`
 - `studies`: `subprojects/studies/`
 - `la_laa`: `subprojects/la_laa/`
+- `la_laa_slaao`: `subprojects/la_laa_slaao/`
 - `vertebral_manual`: `subprojects/vertebral_manual/`
+
+### la_laa_slaao
+
+Extension of `la_laa` for thrombus-inclusive LAA segmentation and SLAAO filling-state
+representation learning. Adds CT-native foundation encoders, visual tokenization,
+positive/negative anatomical priors, filling-defect mapping, and uncertainty-aware
+segmentation. See `docs/protocols/laa_slaao_framework.md` for the full specification.
 
 ## Design Rules
 

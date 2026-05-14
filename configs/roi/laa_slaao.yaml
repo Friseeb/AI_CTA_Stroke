@@ -1,0 +1,35 @@
+roi_id: laa_slaao
+description: >
+  ROI configuration for thrombus-inclusive LAA segmentation and SLAAO filling-state analysis.
+  Extends the heart ROI with pathological filling-state and prior-fusion parameters.
+parent_roi: heart
+target_structures:
+  laa_cavity: true
+  laa_thrombus: true
+  laa_ostium: true
+  left_atrium: true
+positive_priors:
+  - left_atrium
+  - laa
+  - ostium
+  - atrial_cavity
+  - appendage_continuity
+negative_priors:
+  - coronary_arteries
+  - lungs
+  - pulmonary_veins
+  - aorta
+  - pulmonary_artery
+  - myocardium
+  - mediastinum
+  - pericardial_fat
+  - bone_calcification_artifact
+hu_range:
+  min: -200
+  max: 700
+filling_state_hu_thresholds:
+  thrombus_dark_max: 50
+  stagnation_range: [50, 150]
+  normal_lumen_min: 200
+prior_disagreement_map: true
+distance_transform: true

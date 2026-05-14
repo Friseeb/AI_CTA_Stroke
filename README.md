@@ -6,6 +6,7 @@ This repository is organized around a single canonical flow:
 2. NIfTI defacing  
 3. Branch into focused substudies:
    - LA/LAA substudy
+   - LA/LAA SLAAO substudy (thrombus-inclusive + filling-state representation)
    - CTA vertebral optimization substudy
    - CTA carotids substudy
    - Circle of Willis substudy
@@ -103,6 +104,32 @@ python <PROJECT_ROOT>/scripts/run_nv_segment_ct_laa.py \
 1. Mesh extraction: `scripts/run_laa_shape_descriptors.py`
 2. LA/LAA metrics batch: `scripts/run_la_laa_metrics_batch.py`
 3. HTML report: `scripts/generate_la_laa_shape_report.py`
+
+## Substudy E: LA/LAA SLAAO (Thrombus-Inclusive + Filling-State)
+
+Subproject home:
+
+- `subprojects/la_laa_slaao/README.md`
+
+Full framework specification:
+
+- `docs/protocols/laa_slaao_framework.md`
+
+Pipeline profile:
+
+- `configs/profiles/p60_analysis_la_laa_slaao.yaml`
+
+This substudy extends Substudy A with:
+
+- Thrombus-inclusive anatomical LAA segmentation (positive + negative prior fusion)
+- SLAAO multi-label filling-state classification
+- CT-native foundation encoders (CT-FM, VoxelFM, Merlin) and visual tokenization
+- Filling-defect mapping and uncertainty-aware segmentation
+- Radiomics + topology analysis of filling states
+
+Development follows six phases (annotation infrastructure → dataset curation →
+encoder comparison → tokenization → radiomics → clinical modeling).
+See `docs/protocols/laa_slaao_framework.md` for the phase breakdown.
 
 ## Substudy B: CTA Vertebral Optimization
 

@@ -10,6 +10,19 @@ within `AI_CTA_Stroke`.
 - LA/LAA relational shape metrics
 - Report generation for LA/LAA shape/radiomics interpretation
 
+## Extension: Thrombus-Inclusive SLAAO Framework
+
+See `subprojects/la_laa_slaao/` for the extension that adds:
+
+- Thrombus-inclusive anatomical LAA segmentation
+- SLAAO multi-label filling-state classification
+- CT-native foundation encoder integration
+- Visual tokenization of filling states
+- Filling-defect and uncertainty mapping
+- Positive and negative anatomical prior fusion
+
+Full specification: `docs/protocols/laa_slaao_framework.md`
+
 ## Canonical Data Flow
 
 1. Input: defaced CTA NIfTI (`<BIDS_ROOT>/derivatives/defaced/...`)
@@ -31,6 +44,7 @@ within `AI_CTA_Stroke`.
 ## Protocol References
 
 - `docs/protocols/laa_highres_dataset_setup.md`
+- `docs/protocols/laa_slaao_framework.md`
 - `docs/NEXT_STEPS_RADIOMICS_MESH_DEFACE.md`
 
 ## Minimal Run Skeleton
