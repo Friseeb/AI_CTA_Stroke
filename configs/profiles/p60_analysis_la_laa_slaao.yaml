@@ -1,0 +1,61 @@
+profile_id: p60_analysis_la_laa_slaao
+stage: analysis
+roi_groups: [heart]
+description: >
+  Thrombus-inclusive LAA segmentation and SLAAO filling-state analysis.
+  Extends p60_analysis_la_laa with pathological prior fusion, uncertainty mapping,
+  and multi-label SLAAO classification.
+modules:
+  radiomics: true
+  shape: true
+  calcium_score: false
+  atheroburden: false
+  tortuosity: false
+  prior_fusion: true
+  thrombus_inclusive_segmentation: true
+  filling_defect_map: true
+  slaao_multilabel: true
+  uncertainty_map: true
+  foundation_encoder: true
+  visual_tokenization: true
+  topology_analysis: true
+prior_fusion:
+  positive_priors:
+    - left_atrium
+    - laa
+    - ostium
+    - atrial_cavity
+  negative_priors:
+    - coronary_arteries
+    - lungs
+    - pulmonary_veins
+    - aorta
+    - pulmonary_artery
+    - myocardium
+    - pericardial_fat
+    - bone
+  generate_disagreement_maps: true
+  generate_distance_transforms: true
+slaao_labels:
+  - dark_thrombus_component
+  - contrast_stagnation
+  - rim_pattern
+  - whole_LAA_involvement
+  - regional_pooling
+  - distal_tip_involvement
+  - mixed_pattern
+  - uncertain_artifact
+foundation_encoders:
+  - dinov2
+  - ct_fm
+  - voxelfm
+  - merlin
+products:
+  - corrected_laa_mask
+  - filling_defect_map
+  - uncertainty_map
+  - correction_map
+  - slaao_labels_json
+  - radiomics_csv
+  - la_laa_metrics_csv
+  - topology_metrics_csv
