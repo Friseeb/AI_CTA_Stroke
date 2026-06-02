@@ -1,0 +1,53 @@
+# Default pipeline configuration — research prototype, not diagnostic.
+
+pipeline:
+  disclaimer: "RESEARCH PROTOTYPE — NOT FOR CLINICAL DIAGNOSIS"
+
+preprocessing:
+  target_spacing_mm: 0.5          # isotropic resampling target
+  orientation: "RAS"              # internal image orientation convention
+  hu_clip_min: -1000              # neural-input HU clamp low
+  hu_clip_max: 3000               # neural-input HU clamp high
+  min_patient_age_years: 18       # exclude pediatric if DICOM age available
+
+roi:
+  method: "totalseg_teeth"        # totalseg_teeth | totalseg_craniofacial | dentalsegmentator_coarse | threshold_fallback
+  margin_mm: 20.0                 # expansion around label bbox
+  threshold_fallback_hu: 700      # HU threshold for fallback mode
+
+deface:
+  mode: "mask_only"               # none | mask_only | posthoc | pre
+  executable: null                # path to CTA-DEFACE or CT-Defacer; null = auto-detect
+
+segmentation:
+  backend: "totalseg_teeth"       # totalseg_teeth | dentalsegmentator | oralseg | rail | none
+  totalsegmentator:
+    task: "teeth"
+    fast: false
+    device: "cpu"                 # cpu | gpu
+    weights_dir: null             # null = TotalSegmentator default
+  dentalsegmentator:
+    weights_path: null            # path to Dataset112_DentalSegmentator_v100.zip or unpacked dir
+    nnunet_results_dir: null
+  oralseg:
+    model_path: null              # local path or null for HuggingFace auto-download
+  rail:
+    model_path: null
+
+features:
+  periapical_search_radius_mm: 5.0
+  periapical_low_hu_threshold: -50
+  periapical_min_volume_mm3: 10.0
+  periodontal_bone_loss_min_height_mm: 3.0
+  allow_threshold_fallback_features: false  # must be explicitly enabled
+
+qc:
+  dpi: 150
+  window_center_hu: 400
+  window_width_hu: 1500
+  mip_slab_mm: 20.0
+  overlay_alpha: 0.4
+
+report:
+  include_dicom_series_uid: true
+  include_reconstruction_kernel: true
