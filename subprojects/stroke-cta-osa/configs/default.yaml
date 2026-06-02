@@ -1,0 +1,81 @@
+# stroke_cta_osa — default configuration
+# RESEARCH PROTOTYPE: not for clinical use. Override fields at the command
+# line with --config /path/to/yaml or programmatically via apply_overrides().
+
+disclaimer: "RESEARCH PROTOTYPE — NOT FOR CLINICAL DIAGNOSIS"
+output_dir: null   # if null the CLI requires --out
+
+ingestion:
+  input_type: auto              # dicom | nifti | auto
+  orientation: RAS              # RAS | LPS | native
+  resample_spacing_mm: null     # null = keep native spacing
+  age_floor_years: 18           # below this the case is rejected at QC
+
+hu:
+  fat_hu_min: -190
+  fat_hu_max:  -30
+  air_hu_max:  -500
+  bone_hu_min:  250
+
+airway:
+  use_existing_dental_airway_outputs: false
+  dental_airway_mask_path: null
+  dental_landmarks_path:   null
+  dental_features_path:    null
+  fallback_method: threshold_connected_component  # | external_mask_only | none
+  external_mask_path: null
+  min_component_volume_ml: 1.0
+  morphology_closing_mm: 1.0
+  centerline_orthogonal_csa: false   # v1 uses axial CSA
+  retropalatal_window_mm: 15.0
+  retroglossal_window_mm: 15.0
+  retrolingual_window_mm: 10.0
+
+fat:
+  parapharyngeal_lateral_band_mm: 25.0
+  parapharyngeal_axial_window_mm: 30.0
+  retropharyngeal_posterior_band_mm: 15.0
+  retropharyngeal_axial_window_mm: 30.0
+  subcutaneous_erosion_mm: 6.0
+  body_air_threshold_hu: -250.0
+  exclude_bone_for_fat: true
+  exclude_vessels_hu_min: 120.0
+
+coverage:
+  include_hard_palate: optional
+  include_hyoid: optional
+  include_epiglottis: optional
+  include_cervical_soft_tissues: required
+
+qc:
+  min_z_extent_mm: 60.0
+  max_slice_thickness_mm: 3.0
+  dental_artifact_hu_threshold: 2500.0
+  dental_artifact_voxel_fraction_warn: 0.001
+
+output:
+  save_masks: false
+  save_qc_images: true
+  save_overlays: false
+
+radiomics:
+  enabled: false
+  rois: [airway, parapharyngeal_fat]
+  bin_width_hu: 25.0
+  label_value: 1
+
+perivascular:
+  enabled: false
+  carotid_mask_path: null
+  plaque_mask_path: null
+  pericarotid_shell_mm: 3.0
+
+thoracic:
+  enabled: false
+  epicardial_mask_path: null
+  mediastinal_mask_path: null
+
+clinical:
+  clinical_csv_path: null
+  patient_id_column: patient_id
+  scan_id_column: scan_id

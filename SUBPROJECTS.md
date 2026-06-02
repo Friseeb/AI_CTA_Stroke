@@ -11,6 +11,9 @@ Primary workflow documentation lives in `README.md`.
 - `studies`: `subprojects/studies/`
 - `la_laa`: `subprojects/la_laa/`
 - `vertebral_manual`: `subprojects/vertebral_manual/`
+- `aorta_cta_radiomics`: `aorta_cta_radiomics/`
+- `cta-dental-opportunistic-screening`: `subprojects/cta-dental-opportunistic-screening/` — opportunistic dental analysis from head/neck CTA
+- `stroke-cta-osa`: `subprojects/stroke-cta-osa/` — CTA-derived airway / cervical-adiposity features for OSA & nocturnal vascular-risk phenotyping in stroke cohorts (see `docs/stroke_cta_osa/`)
 
 ## Design Rules
 

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cta-dental-opportunistic-screening"
+version = "0.1.0"
+description = "Research prototype for opportunistic dental/oral-health analysis from routine head/neck CTA"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Research Prototype" }]
+
+dependencies = [
+    "typer[all]>=0.12",
+    "SimpleITK>=2.3",
+    "nibabel>=5.2",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "scikit-image>=0.22",
+    "pydantic>=2.6",
+    "matplotlib>=3.8",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dicom = ["pydicom>=2.4"]
+dev = ["pytest>=8.0", "pytest-cov"]
+
+[project.scripts]
+cta-dental = "cta_dental.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["cta_dental*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
