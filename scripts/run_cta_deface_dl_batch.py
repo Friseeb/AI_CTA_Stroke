@@ -19,12 +19,15 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 import nibabel as nib
 import numpy as np
+from tqdm import tqdm
 
 
 def strip_nii_suffix(name: str) -> str:
@@ -184,7 +187,19 @@ def launch_workers(
         ]
 
         logf = w.log_path.open("w", encoding="utf-8")
-        w.proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, env=env)
+        w.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                  env=env, text=True, bufsize=1)
+        bar = tqdm(total=len(w.cases), desc=f"GPU {w.gpu} inference", position=int(w.gpu), leave=True)
+
+        def _stream(proc: subprocess.Popen, log, pbar: tqdm) -> None:
+            for line in proc.stdout:
+                log.write(line)
+                log.flush()
+                if "predicting" in line.lower():
+                    pbar.update(1)
+            pbar.close()
+
+        threading.Thread(target=_stream, args=(w.proc, logf, bar), daemon=True).start()
         print(f"[LAUNCHED] GPU {w.gpu}: {len(w.cases)} cases -> {w.log_path}")
 
 
@@ -212,12 +227,15 @@ def create_defaced_and_masks(
         if not w.cases:
             continue
         case_map = {strip_nii_suffix(p.name): p for p in w.cases}
-        for pred in sorted(w.pred_dir.glob("*.nii.gz")):
+        preds = sorted(w.pred_dir.glob("*.nii.gz"))
+        for pred in tqdm(preds, desc=f"GPU {w.gpu} applying masks"):
             case_id = strip_nii_suffix(pred.name)
             if case_id not in case_map:
                 continue
 
             src = case_map[case_id]
+            t0 = time.time()
+
             mask_img = nib.load(str(pred))
             mask = mask_img.get_fdata() > 0.5
 
@@ -231,6 +249,9 @@ def create_defaced_and_masks(
 
             nib.save(nib.Nifti1Image(mask.astype(np.uint8), src_img.affine, src_img.header), str(out_mask))
             nib.save(nib.Nifti1Image(defaced.astype(np.float32), src_img.affine, src_img.header), str(out_defaced))
+
+            elapsed = time.time() - t0
+            tqdm.write(f"  {case_id}  {elapsed:.1f}s")
 
             rows.append(
                 {
@@ -264,7 +285,7 @@ def run_pydeface_backend(
         )
 
     rows: list[dict] = []
-    for src in pending:
+    for src in tqdm(pending, desc="Defacing"):
         case_id = strip_nii_suffix(src.name)
         out_defaced = output_dir / f"{case_id}_defaced.nii.gz"
         log_path = tmp_root / f"pydeface_{case_id}_{run_ts}.log"
@@ -397,8 +418,8 @@ def main() -> int:
 
     any_fail = any(code != 0 for code in rc_map.values())
     if any_fail:
-        print("One or more GPU workers failed. Check logs under:", tmp_root)
-        return 1
+        print(f"One or more GPU workers failed — applying predictions from successful workers anyway.")
+        print(f"Check logs under: {tmp_root}")
 
     rows = create_defaced_and_masks(workers, output_dir, mask_dir)
     ok_cases = {r["case_id"] for r in rows}

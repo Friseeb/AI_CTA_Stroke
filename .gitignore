@@ -33,6 +33,9 @@ venv/
 # Data
 data/
 test_data/
+cohort_generation/inputs/
+cohort_generation/outputs/*
+!cohort_generation/outputs/.gitkeep
 
 # TotalSegmentator cache
 ~/.totalsegmentator/
