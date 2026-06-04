@@ -7,9 +7,9 @@ from the combined segmentation output.
 
 Example:
   python scripts/run_cardiac_ct_explorer_laa.py \
-    --input /path/to/sub-547_defaced.nii.gz \
-    --output-dir /path/to/outputs/cardiac_ct_explorer_547 \
-    --laa-output /path/to/outputs/cardiac_ct_explorer_547/sub-547_defaced_laa8.nii.gz \
+    --input /path/to/<CASE_ID>_defaced.nii.gz \
+    --output-dir /path/to/outputs/cardiac_ct_explorer_<CASE_ID> \
+    --laa-output /path/to/outputs/cardiac_ct_explorer_<CASE_ID>/<CASE_ID>_defaced_laa8.nii.gz \
     --device auto
 """
 from __future__ import annotations

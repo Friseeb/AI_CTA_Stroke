@@ -13,8 +13,8 @@ Outputs:
 
 Example (single scan):
   python scripts/run_laa_shape_descriptors.py \
-    --input /path/to/sub-547_defaced_laa8.nii.gz \
-    --output-dir /path/to/outputs/laa_shape_547 \
+    --input /path/to/<CASE_ID>_defaced_laa8.nii.gz \
+    --output-dir /path/to/outputs/laa_shape_<CASE_ID> \
     --label-id 1
 """
 from __future__ import annotations

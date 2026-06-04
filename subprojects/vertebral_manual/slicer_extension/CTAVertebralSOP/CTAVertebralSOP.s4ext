@@ -1,0 +1,15 @@
+# Extension description file
+# https://www.slicer.org/wiki/Documentation/Nightly/Developers/Extensions/DescriptionFile
+
+name CTAVertebralSOP
+scm local
+scmurl https://github.com/Friseeb/AI_CTA_Stroke
+scmrevision main
+homepage https://github.com/Friseeb/AI_CTA_Stroke
+category Cardiac
+iconurl
+status
+description CTA Vertebral SOP tools: guided segmentation wizard and finalize/save utility.
+contributors Sebastian Fridman (NYU)
+depends
+build_type

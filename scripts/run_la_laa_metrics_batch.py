@@ -24,14 +24,14 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--mesh-root",
-        default="/mnt/cta_ssd/daylightbids/derivatives/shape_meshes_repro",
+        default="./outputs/shape_meshes_repro",
         help="Root containing per-case mesh folders.",
     )
     p.add_argument("--la-suffix", default="left_atrium_highres", help="LA mesh suffix token.")
     p.add_argument("--laa-suffix", default="laa_nudf", help="LAA mesh suffix token.")
     p.add_argument(
         "--out-csv",
-        default="/mnt/cta_ssd/daylightbids/derivatives/shape_meshes_repro/la_laa_metrics_batch.csv",
+        default="./outputs/shape_meshes_repro/la_laa_metrics_batch.csv",
         help="Output CSV path.",
     )
     p.add_argument("--subject", action="append", default=[], help="Optional subject IDs filter (repeatable).")

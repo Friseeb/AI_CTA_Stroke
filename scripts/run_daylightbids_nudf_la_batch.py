@@ -69,7 +69,7 @@ def _run(
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Batch NUDF/TotalSegmentator/MONAI pipeline for DAYLIGHTBIDS CTAs")
-    p.add_argument("--root", default="/Volumes/DICOM3/DAYLIGHTBIDS", help="DAYLIGHTBIDS root")
+    p.add_argument("--root", default="./data/daylightbids", help="DAYLIGHTBIDS root")
     p.add_argument("--use-nondefaced", action="store_true", help="Use root CTA files instead of derivatives/defaced")
     p.add_argument("--input-dir", default=None, help="Override input dir (default depends on --use-nondefaced)")
     p.add_argument("--input-glob", default=None, help="Override input glob pattern")

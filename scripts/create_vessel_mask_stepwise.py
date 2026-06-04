@@ -13,8 +13,8 @@ Steps:
 
 Usage:
     python scripts/create_vessel_mask_stepwise.py \
-        --cta data/sub-547_acq-CTA_ct.nii.gz \
-        --output outputs/test_547_steps
+        --cta data/<CASE_ID>_acq-CTA_ct.nii.gz \
+        --output outputs/<CASE_ID>_steps
 """
 
 import argparse

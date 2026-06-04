@@ -12,7 +12,7 @@ For more robust defacing, consider CTA-DEFACE: https://github.com/CCI-Bonn/CTA-D
 
 Usage:
     python scripts/deface_cta_simple.py \
-        --input data/sub-547_acq-CTA_ct.nii.gz \
+        --input data/<CASE_ID>_acq-CTA_ct.nii.gz \
         --output outputs/test/defaced_cta.nii.gz
 """
 

@@ -1,0 +1,13 @@
+profile_id: p60_analysis_carotid
+stage: analysis
+roi_groups: [cervical]
+modules:
+  radiomics: true
+  shape: false
+  calcium_score: true
+  atheroburden: true
+  tortuosity: true
+products:
+  - carotid_radiomics_csv
+  - carotid_atheroburden_csv
+  - carotid_tortuosity_csv

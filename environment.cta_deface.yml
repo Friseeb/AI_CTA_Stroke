@@ -1,0 +1,19 @@
+name: cta-deface
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy<2
+  - scipy
+  - nibabel
+  - simpleitk
+  - scikit-image
+  - scikit-learn
+  - pandas
+  - tqdm
+  - pip:
+      - torch==2.3.1
+      - torchvision==0.18.1
+      - torchaudio==2.3.1
+      - nnunetv2==2.2.1

@@ -1,0 +1,2 @@
+case_id,cta_path,label_path
+sub-001,<BIDS_ROOT>/sub-001_acq-CTA_ct.nii.gz,<BIDS_ROOT>/derivatives/vertebral_manual/sub-001_acq-CTA_ct_vert_clean.nii.gz

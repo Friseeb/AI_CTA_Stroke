@@ -1,0 +1,12 @@
+roi_group: intracranial
+labels:
+  topcow:
+    mode: label
+    offset_default: 100
+    source: topcow_claim
+analysis_defaults:
+  radiomics: true
+  shape: false
+  calcium_score: false
+  atheroburden: false
+  tortuosity: true

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stroke-cta-osa"
+version = "0.1.0"
+description = "Research pipeline extracting CTA-derived airway/adiposity features for OSA / nocturnal vascular-risk phenotyping in acute stroke cohorts. Not for clinical diagnosis."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Research Prototype" }]
+
+dependencies = [
+    "typer[all]>=0.12",
+    "SimpleITK>=2.3",
+    "nibabel>=5.2",
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "scikit-image>=0.22",
+    "pandas>=2.1",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dicom = ["pydicom>=2.4"]
+radiomics = ["pyradiomics>=3.1"]
+viz = ["matplotlib>=3.8"]
+dev = ["pytest>=8.0", "pytest-cov"]
+
+[project.scripts]
+stroke-cta-osa = "stroke_cta_osa.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stroke_cta_osa*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

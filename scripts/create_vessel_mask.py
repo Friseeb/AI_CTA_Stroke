@@ -3,9 +3,9 @@
 Create vessel mask from CTA scan (one-time preprocessing step).
 
 Usage:
-  python scripts/create_vessel_mask.py --input data/sub-547_acq-CTA_ct.nii.gz --output outputs/vessel_masks/sub547_mask.nii.gz
+  python scripts/create_vessel_mask.py --input data/<CASE_ID>_acq-CTA_ct.nii.gz --output outputs/vessel_masks/<CASE_ID>_mask.nii.gz
 
-This saves a binary vessel mask that can be reused for multiple centerline runs.
+This saves a binary vessel mask for downstream vessel-analysis workflows.
 """
 
 import sys

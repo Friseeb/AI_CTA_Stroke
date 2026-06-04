@@ -1,0 +1,14 @@
+profile_id: p90_end_to_end_default
+stage: end_to_end
+includes:
+  segmentation_profile: p30_segmentation_all
+  analysis_profiles:
+    - p60_analysis_la_laa
+    - p60_analysis_carotid
+    - p60_analysis_intracranial
+execution_order:
+  - ingest
+  - deface
+  - segmentation
+  - analysis
+  - clustering_and_reports
