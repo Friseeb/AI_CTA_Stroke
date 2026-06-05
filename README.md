@@ -9,6 +9,7 @@ This repository is organized around a single canonical flow:
    - CTA vertebral optimization substudy
    - CTA carotids substudy
    - Circle of Willis substudy
+   - Aorta CTA radiomics substudy
 
 ## Recommended Organization Model
 
@@ -149,6 +150,14 @@ Optional integration into merged labelmap is supported by:
 
 - `scripts/run_full_segmentation_pipeline.py` (`--run-topcow --merge-labels`)
 - `scripts/build_all_segmentations_labelmap.py`
+
+## Substudy E: Aorta CTA Radiomics
+
+Subproject home:
+
+- `aorta_cta_radiomics/README.md`
+
+This is an aorta-only research pipeline that starts from CTA NIfTI images and existing aorta masks, then extracts mask QC, physical peri-aortic shells, calcification burden, initial geometry/irregularity attention metrics, and PyRadiomics features. It does not segment plaque or classify tissue as plaque.
 
 ## End-to-End Orchestrator
 

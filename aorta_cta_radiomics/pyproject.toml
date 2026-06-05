@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aorta-cta-radiomics"
+version = "0.1.0"
+description = "Aorta-focused stroke CTA radiomics pipeline using existing aorta masks."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+  {name = "Sebastian Fridman"}
+]
+dependencies = [
+  "numpy",
+  "scipy",
+  "pandas",
+  "scikit-image",
+  "scikit-learn",
+  "SimpleITK",
+  "nibabel",
+  "pyradiomics==3.0.1",
+  "PyYAML",
+  "typer",
+  "tqdm",
+  "matplotlib",
+]
+
+[project.optional-dependencies]
+mesh = ["pyvista", "trimesh"]
+monai = ["monai", "torch"]
+encoders = ["torch", "transformers"]
+ct-fm = ["torch", "monai", "lighter-zoo"]
+all-encoders = ["torch", "transformers", "monai", "lighter-zoo"]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+aorta-cta = "aorta_cta_radiomics.cli:main"
+aorta-cta-qc = "aorta_cta_radiomics.qc_slicer:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

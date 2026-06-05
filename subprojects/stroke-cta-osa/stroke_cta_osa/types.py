@@ -119,14 +119,29 @@ class CaseResult:
     optional: dict[str, Any] = field(default_factory=dict)
     radiomics: dict[str, Any] = field(default_factory=dict)
     composite: dict[str, Any] = field(default_factory=dict)
+    # Additive blocks for the v2 modules. Kept separate so existing callers
+    # that only consume `airway`/`fat`/`composite` keep working.
+    tongue: dict[str, Any] = field(default_factory=dict)
+    mandible: dict[str, Any] = field(default_factory=dict)
+    soft_tissue: dict[str, Any] = field(default_factory=dict)
+    skeletal: dict[str, Any] = field(default_factory=dict)
+    airway_regions: dict[str, Any] = field(default_factory=dict)
+    fat_regions: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def to_feature_row(self) -> dict[str, Any]:
+        """Concatenate every block into one stable-key row.
+
+        Stable column ordering is established by `output._reorder_columns`
+        and the metric registry; we just merge the dicts here.
+        """
         row: dict[str, Any] = {}
         for block in (
-            self.identifiers, self.qc, self.airway, self.fat,
-            self.optional, self.radiomics, self.composite,
+            self.identifiers, self.qc, self.airway, self.airway_regions,
+            self.tongue, self.mandible, self.soft_tissue, self.skeletal,
+            self.fat, self.fat_regions, self.optional, self.radiomics,
+            self.composite,
         ):
             row.update(block)
         return row

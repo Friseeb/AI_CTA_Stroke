@@ -1,0 +1,43 @@
+radiomics:
+  enabled: false
+
+encoders:
+  enabled: true
+  device: auto
+  patch_sources:
+    - calcification_500HU
+    - wall_morphology_inward_parcels_wall
+    - wall_morphology_outward_parcels_wall
+  max_patches_per_source: 64
+  patch_size_mm_zyx: [3, 8, 8]
+  backends:
+    - name: tap_ct
+      backend: tap_ct_hf
+      model_name: fomofo/tap-ct-b-3d
+      trust_remote_code: true
+      target_shape_zyx: [12, 224, 224]
+      hu_clip: [-1008, 822]
+      normalization_mean: -86.8086
+      normalization_std: 322.6347
+
+    - name: ct_fm
+      backend: ct_fm_lighter_zoo
+      model_name: project-lighter/ct_fm_feature_extractor
+      target_shape_zyx: [64, 64, 64]
+      hu_clip: [-1024, 2048]
+
+    # Enable after setting the exact released VoxelFM model ID or local path.
+    # The arXiv paper describes public weights/code, but the stable HF identifier
+    # should be pinned here before running patient-scale experiments.
+    - name: voxelfm
+      enabled: false
+      backend: voxelfm_hf
+      model_name: ""
+      trust_remote_code: true
+      target_shape_zyx: [12, 224, 224]
+      hu_clip: [-1008, 822]
+      normalization_mean: -86.8086
+      normalization_std: 322.6347
+
+outputs:
+  save_figures: true
