@@ -1,0 +1,12 @@
+data/raw/*
+data/masks/*
+data/derivatives/*
+outputs/*
+
+!data/raw/.gitkeep
+!data/masks/.gitkeep
+!data/derivatives/.gitkeep
+!outputs/features/.gitkeep
+!outputs/qc/.gitkeep
+!outputs/masks/.gitkeep
+!outputs/figures/.gitkeep

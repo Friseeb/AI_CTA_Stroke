@@ -1,0 +1,24 @@
+setting:
+  binWidth: 25
+  resampledPixelSpacing: [1, 1, 1]
+  interpolator: sitkBSpline
+  normalize: false
+  correctMask: true
+  label: 1
+
+imageType:
+  Original: {}
+
+featureClass:
+  firstorder: []
+  shape: []
+  glcm: []
+  glrlm: []
+  glszm: []
+  ngtdm: []
+  gldm: []
+
+# Add wavelet features deliberately after validating runtime and feature stability:
+# imageType:
+#   Original: {}
+#   Wavelet: {}

@@ -94,6 +94,27 @@ def extract(
     save_masks: Annotated[bool, typer.Option("--save-masks")] = False,
     no_qc_images: Annotated[bool, typer.Option("--no-qc-images")] = False,
     radiomics: Annotated[bool, typer.Option("--radiomics")] = False,
+    # ---- v2 mask + landmark options ----
+    external_airway_mask: Annotated[Optional[Path], typer.Option(
+        "--external-airway-mask",
+        help="External airway mask NIfTI (preferred over fallback / dental).",
+    )] = None,
+    external_tongue_mask: Annotated[Optional[Path], typer.Option(
+        "--external-tongue-mask", help="External tongue mask NIfTI.")] = None,
+    external_mandible_mask: Annotated[Optional[Path], typer.Option(
+        "--external-mandible-mask", help="External mandible mask NIfTI.")] = None,
+    external_soft_palate_mask: Annotated[Optional[Path], typer.Option(
+        "--external-soft-palate-mask",
+        help="External soft-palate mask NIfTI.")] = None,
+    external_oral_cavity_mask: Annotated[Optional[Path], typer.Option(
+        "--external-oral-cavity-mask",
+        help="External oral-cavity mask NIfTI.")] = None,
+    landmarks: Annotated[Optional[Path], typer.Option(
+        "--landmarks", help="Explicit landmarks JSON.")] = None,
+    save_qc_images: Annotated[bool, typer.Option(
+        "--save-qc-images",
+        help="Enable matplotlib QC overlay generation (overrides --no-qc-images).",
+    )] = False,
     open_slicer: Annotated[bool, typer.Option(
         "--open-slicer",
         help="After extraction, launch 3D Slicer with the QC scene "
@@ -120,8 +141,16 @@ def extract(
     }
     cfg = apply_overrides(cfg, {k: v for k, v in overrides.items() if v is not None})
 
-    result = extract_case(input_path=input, out_dir=out, cfg=cfg,
-                          patient_id=patient_id)
+    result = extract_case(
+        input_path=input, out_dir=out, cfg=cfg,
+        patient_id=patient_id,
+        external_airway_mask_path=external_airway_mask,
+        external_tongue_mask_path=external_tongue_mask,
+        external_mandible_mask_path=external_mandible_mask,
+        external_soft_palate_mask_path=external_soft_palate_mask,
+        external_oral_cavity_mask_path=external_oral_cavity_mask,
+        external_landmarks_path=landmarks,
+    )
     paths = write_outputs([result], out_dir=out)
     append_processing_log(out / "case_processing_log.jsonl", result,
                           {"input_path": str(input)})
@@ -270,6 +299,67 @@ def merge_clinical_cmd(
         patient_id_column=patient_id_column, scan_id_column=scan_id_column,
     )
     console.print_json(json.dumps(summary, default=str))
+
+
+# --- list-features ----------------------------------------------------------
+
+@app.command(name="list-features")
+def list_features_cmd(
+    out: Annotated[Optional[Path], typer.Option(
+        "--out", "-o",
+        help="Output file. Format inferred from extension: .csv | .json. "
+             "Defaults to printing the table to stdout.",
+    )] = None,
+    fmt: Annotated[str, typer.Option(
+        "--format", help="Force output format: csv | json | table.",
+    )] = "auto",
+) -> None:
+    """Export the metric registry — the canonical feature dictionary."""
+    from .metric_registry import to_csv, to_json, to_records
+    if out is not None:
+        ext = out.suffix.lower().lstrip(".")
+        fmt = ext if fmt == "auto" else fmt
+        if fmt == "csv":
+            to_csv(out)
+        elif fmt == "json":
+            to_json(out)
+        else:
+            raise typer.BadParameter(
+                f"unknown format {fmt!r}; use csv or json (or omit --out for table)"
+            )
+        console.print(f"[green]Wrote {fmt} → {out}[/green]")
+    else:
+        recs = to_records()
+        for r in recs:
+            console.print(
+                f"  [bold]{r['feature_name']:55s}[/bold] "
+                f"[{r['family']:14s}] [{r['unit']:8s}] "
+                f"[{r['tier']:11s}] [{r['maturity']:12s}]"
+            )
+        console.print(f"\n[dim]{len(recs)} metrics in registry.[/dim]")
+
+
+# --- validate-landmarks -----------------------------------------------------
+
+@app.command(name="validate-landmarks")
+def validate_landmarks_cmd(
+    image: Annotated[Path, typer.Argument(help="CTA NIfTI for shape/affine check.")],
+    landmarks_path: Annotated[Path, typer.Argument(
+        help="Landmarks JSON to validate.")],
+) -> None:
+    """Validate that a landmarks JSON is well-formed against an image."""
+    from .io import load_input
+    from .landmarks import load_landmarks, validate_landmarks
+    cta, _ = load_input(image)
+    bundle = load_landmarks(landmarks_path)
+    warnings = validate_landmarks(bundle, image=cta)
+    if not warnings:
+        console.print(f"[green]OK — {landmarks_path.name} validates against "
+                      f"image {image.name}[/green]")
+        return
+    console.print(f"[yellow]{len(warnings)} warning(s):[/yellow]")
+    for w in warnings:
+        console.print(f"  - {w}")
 
 
 # --- helpers ----------------------------------------------------------------
