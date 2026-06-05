@@ -68,10 +68,90 @@ class FatConfig(BaseModel):
 class RadiomicsConfig(BaseModel):
     enabled: bool = False
     rois: list[Literal[
-        "airway", "cervical_fat", "parapharyngeal_fat", "combined_airway_soft_tissue"
-    ]] = Field(default_factory=lambda: ["airway", "parapharyngeal_fat"])
+        "airway", "tongue", "posterior_tongue", "cervical_fat",
+        "parapharyngeal_fat", "retropharyngeal_fat", "soft_palate",
+        "lateral_wall", "combined_airway_soft_tissue",
+    ]] = Field(default_factory=lambda: [
+        "airway", "tongue", "parapharyngeal_fat", "soft_palate",
+    ])
     bin_width_hu: float = 25.0
     label_value: int = 1
+
+
+class TongueConfig(BaseModel):
+    """Tongue-module configuration; see `stroke_cta_osa.tongue`."""
+    enabled: bool = True
+    require_mask_for_volume: bool = True
+    allow_posterior_roi_fallback: bool = True
+    low_hu_threshold: float = 30.0
+    low_hu_threshold_mode: Literal["absolute", "relative"] = "absolute"
+    record_contrast_sensitivity: bool = True
+    external_mask_path: Optional[str] = None
+
+
+class MandibleConfig(BaseModel):
+    enabled: bool = True
+    allow_bone_threshold_fallback: bool = True
+    bone_hu_min: float = 250.0
+    require_mask_for_volume: bool = False
+    bone_min_volume_ml: float = 5.0
+    external_mask_path: Optional[str] = None
+
+
+class OralCavityConfig(BaseModel):
+    enabled: bool = True
+    external_mask_path: Optional[str] = None
+
+
+class SoftTissueConfig(BaseModel):
+    enabled: bool = True
+    require_masks_for_volumes: bool = True
+    allow_landmark_length_fallback: bool = True
+    lateral_wall_band_mm: float = 15.0
+    lateral_wall_axial_window_mm: float = 20.0
+    body_air_threshold_hu: float = -250.0
+    soft_palate_mask_path: Optional[str] = None
+    uvula_mask_path: Optional[str] = None
+    palatine_tonsil_left_mask_path: Optional[str] = None
+    palatine_tonsil_right_mask_path: Optional[str] = None
+
+
+class SkeletalConfig(BaseModel):
+    enabled: bool = True
+    allow_landmark_only_distances: bool = True
+    allow_hyoid_threshold_fallback: bool = False
+    hyoid_mask_path: Optional[str] = None
+
+
+class AirwayRegionConfig(BaseModel):
+    enabled: bool = True
+    prefer_landmark_defined_regions: bool = True
+    allow_axial_approximation: bool = True
+    save_csa_profile: bool = False
+
+
+class FatRegionConfig(BaseModel):
+    enabled: bool = True
+    parapharyngeal_roi_method: Literal[
+        "airway_relative", "atlas", "external"
+    ] = "airway_relative"
+    retropharyngeal_roi_method: Literal[
+        "airway_spine_relative", "airway_relative", "external"
+    ] = "airway_spine_relative"
+    enable_facial_fat: bool = False
+
+
+class LandmarkConfig(BaseModel):
+    explicit_path: Optional[str] = None
+    dental_landmarks_path: Optional[str] = None
+    allow_heuristic_fallback: bool = True
+
+
+class CompositesConfig(BaseModel):
+    enabled: bool = False
+    require_batch_standardization: bool = True
+    suffix: Literal["untrained"] = "untrained"
+    cohort_stats_path: Optional[str] = None
 
 
 class PerivascularConfig(BaseModel):
@@ -121,6 +201,17 @@ class PipelineConfig(BaseModel):
     perivascular: PerivascularConfig = Field(default_factory=PerivascularConfig)
     thoracic: ThoracicConfig = Field(default_factory=ThoracicConfig)
     clinical: ClinicalMergeConfig = Field(default_factory=ClinicalMergeConfig)
+
+    # ---- new module configs (additive) ----
+    tongue: TongueConfig = Field(default_factory=TongueConfig)
+    mandible: MandibleConfig = Field(default_factory=MandibleConfig)
+    oral_cavity: OralCavityConfig = Field(default_factory=OralCavityConfig)
+    soft_tissue: SoftTissueConfig = Field(default_factory=SoftTissueConfig)
+    skeletal: SkeletalConfig = Field(default_factory=SkeletalConfig)
+    airway_regions: AirwayRegionConfig = Field(default_factory=AirwayRegionConfig)
+    fat_regions: FatRegionConfig = Field(default_factory=FatRegionConfig)
+    landmarks: LandmarkConfig = Field(default_factory=LandmarkConfig)
+    composites: CompositesConfig = Field(default_factory=CompositesConfig)
 
     def hash(self) -> str:
         """SHA-1 of the JSON-serialised config. Recorded per case so feature

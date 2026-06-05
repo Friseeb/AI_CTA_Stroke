@@ -1,0 +1,176 @@
+image:
+  assume_hu: true
+  resample_mask_if_needed: true
+
+mask_cleaning:
+  keep_largest_component: true
+  fill_holes: true
+  min_component_voxels: 50
+  small_mask_volume_mm3: 1000
+  large_mask_volume_mm3: 500000
+
+shells:
+  base:
+    - name: shell_0_2mm
+      inner_mm: 0
+      outer_mm: 2
+    - name: shell_2_5mm
+      inner_mm: 2
+      outer_mm: 5
+    - name: shell_5_10mm
+      inner_mm: 5
+      outer_mm: 10
+  combined_internal_mm: 1
+  aorta_wall_internal_mm: 2
+  aorta_wall_external_mm: 2
+  calcification_local_outer_mm: 5
+
+calcification:
+  enabled: true
+  thresholds_hu: [130, 300, 500, 600]
+  roi: aorta_wall_band
+  save_masks: true
+  agatston_like: true
+  dynamic_wall:
+    enabled: true
+    seed_threshold_hu: 500
+    lumen_margin_hu: 75
+    min_candidate_hu: 300
+    lumen_core_distance_mm: 5
+    search_internal_mm: 5
+    search_external_mm: 2
+    smooth_lumen_profile_mm: 10
+    min_core_voxels_per_slice: 20
+    exclude_external_contrast_touching: true
+    external_contrast_tolerance_hu: 75
+
+geometry:
+  enabled: true
+  min_slice_voxels: 20
+  max_branch_link_distance_mm: 20
+  max_components_per_slice: 4
+
+wall_morphology:
+  enabled: true
+  min_slice_voxels: 80
+  axial_step_mm: 2
+  angular_bins: 24
+  smoothing_bins: 9
+  candidate_depth_mm: 4
+  candidate_neighborhood_mm: 2
+  candidate_focal_radius_mm: 1
+  wall_parcel_radius_mm: 1.25
+  max_components_per_slice: 4
+
+lumen_protrusions:
+  enabled: false
+  centerline_interval_mm: 2
+  centerline_smoothing_mm: 6
+  plane_spacing_mm: 0.75
+  radial_sample_step_mm: 0.5
+  max_radius_mm: 35
+  angular_bins: 72
+  angular_median_window_deg: 50
+  longitudinal_smoothing_mm: 12
+  min_depth_mm: 2
+  outward_min_depth_mm:
+  high_risk_depth_mm: 4
+  min_angular_width_deg: 5
+  max_angular_width_deg: 90
+  outward_min_angular_width_deg:
+  outward_max_angular_width_deg:
+  min_length_mm: 1
+  max_length_mm: 25
+  outward_min_length_mm:
+  outward_max_length_mm:
+  end_margin_mm: 10
+  analysis_inner_layer_mm: 0
+  analysis_outer_layer_mm: 0
+  patch_longitudinal_padding_mm: 2
+  patch_angular_padding_deg: 10
+  surface_sheet_thickness_mm: 1
+  surface_projection_depth_mm: 1
+  surface_core_relative_threshold: 0.75
+  surface_core_depth_window_mm: 1
+  surface_core_longitudinal_padding_mm: 0
+  surface_core_angular_padding_deg: 2.5
+  inward_qc_depth_thresholds_mm: []
+  outward_qc_depth_thresholds_mm: []
+  thresholded_qc_sources: [aorta_surface_native, aorta_surface_core]
+  detect_inward: true
+  detect_outward: false
+  intensity_gate_enabled: true
+  centerline_core_radius_mm: 2
+  contrast_lower_margin_hu: 120
+  min_contrast_hu: 150
+  max_contrast_hu_above_reference: 300
+  max_external_contrast_component_volume_mm3: 50
+  max_candidate_outside_aorta_fraction: 1
+  clip_candidate_masks_to_analysis_mask: true
+  save_masks: true
+
+fat_omics:
+  enabled: true
+  external_radius_mm: 5
+  adipose_hu_min: -190
+  adipose_hu_max: -30
+  angle_bins: 12
+  texture_levels: 16
+  radial_bins_mm:
+    - [0, 2]
+    - [2, 5]
+  high_hu_bins:
+    m70_m30: [-70, -30]
+    m50_m30: [-50, -30]
+  save_mask: true
+
+wall_from_fat:
+  enabled: false
+  outer_limit_mm: 5
+  close_radius_mm: 3
+  lumen_core_distance_mm: 5
+  centerline_core_radius_mm: 2
+  contrast_lower_margin_hu: 120
+  min_lumen_hu: 150
+  max_lumen_hu_above_reference: 300
+  smooth_lumen_profile_mm: 10
+  min_core_voxels_per_slice: 20
+  wall_hu_min: -30
+  wall_hu_max: 1200
+  exclude_fat_from_wall: true
+  save_masks: true
+
+radiomics:
+  enabled: true
+  settings_path: configs/radiomics.yaml
+  regions:
+    - aorta_mask
+    - aorta_wall_band
+    - periaortic_fat
+    - shell_0_2mm
+    - shell_2_5mm
+    - shell_5_10mm
+    - shell_calcification_local
+  include_diagnostics: false
+
+encoders:
+  enabled: false
+  device: auto
+  patch_sources:
+    - calcification_500HU
+  max_patches_per_source: 64
+  patch_size_mm_zyx: [12, 32, 32]
+  backends:
+    - name: tap_ct
+      backend: tap_ct_hf
+      model_name: fomofo/tap-ct-b-3d
+      trust_remote_code: true
+      target_shape_zyx: [12, 224, 224]
+      hu_clip: [-1008, 822]
+      normalization_mean: -86.8086
+      normalization_std: 322.6347
+
+outputs:
+  save_masks: true
+  save_figures: true
+  software_version: "0.1.0"

@@ -1,0 +1,115 @@
+radiomics:
+  enabled: false
+
+encoders:
+  enabled: false
+
+geometry:
+  enabled: false
+
+wall_morphology:
+  enabled: false
+
+lumen_protrusions:
+  enabled: true
+  centerline_interval_mm: 2
+  centerline_smoothing_mm: 6
+  plane_spacing_mm: 0.75
+  radial_sample_step_mm: 0.25
+  max_radius_mm: 35
+  angular_bins: 144
+  angular_median_window_deg: 50
+  inward_angular_median_window_deg: 65
+  outward_angular_median_window_deg: 55
+  longitudinal_smoothing_mm: 12
+  inward_longitudinal_smoothing_mm: 18
+  outward_longitudinal_smoothing_mm: 14
+  min_depth_mm: 2
+  outward_min_depth_mm: 1.25
+  high_risk_depth_mm: 4
+  min_angular_width_deg: 5
+  max_angular_width_deg: 90
+  outward_min_angular_width_deg: 2.5
+  outward_max_angular_width_deg: 110
+  min_length_mm: 1
+  max_length_mm: 25
+  outward_min_length_mm: 1
+  outward_max_length_mm: 30
+  min_peak_prominence_mm: 0.35
+  outward_min_peak_prominence_mm: 0.45
+  max_median_depth_fraction: 0.9
+  outward_max_median_depth_fraction: 0.85
+  min_focality_ratio: 1.12
+  outward_min_focality_ratio: 1.18
+  end_margin_mm: 10
+  analysis_inner_layer_mm: 4
+  analysis_outer_layer_mm: 4
+  patch_longitudinal_padding_mm: 2
+  patch_angular_padding_deg: 10
+  surface_sheet_thickness_mm: 1
+  surface_projection_depth_mm: 1
+  surface_core_relative_threshold: 0.75
+  surface_core_depth_window_mm: 1
+  surface_core_longitudinal_padding_mm: 0
+  surface_core_angular_padding_deg: 2.5
+  inward_qc_depth_thresholds_mm: [2, 3, 4]
+  outward_qc_depth_thresholds_mm: [1.5, 2, 3, 4]
+  thresholded_qc_sources: [aorta_surface_native, aorta_surface_core]
+  detect_inward: true
+  detect_outward: true
+  intensity_gate_enabled: true
+  centerline_core_radius_mm: 2
+  contrast_lower_margin_hu: 35
+  min_contrast_hu: 375
+  max_contrast_hu_above_reference: 300
+  contrast_reference_lower_fraction: 0.0
+  contrast_reference_upper_fraction: 0.20
+  max_external_contrast_component_volume_mm3: 50
+  max_candidate_outside_aorta_fraction: 1
+  clip_candidate_masks_to_analysis_mask: true
+  save_masks: true
+
+calcification:
+  thresholds_hu: [130, 300, 500, 600]
+  roi: aorta_wall_band
+  dynamic_wall:
+    enabled: true
+    seed_threshold_hu: 500
+    lumen_margin_hu: 75
+    min_candidate_hu: 300
+    lumen_core_distance_mm: 5
+    search_internal_mm: 5
+    search_external_mm: 2
+    smooth_lumen_profile_mm: 10
+    min_core_voxels_per_slice: 20
+    exclude_external_contrast_touching: true
+    external_contrast_tolerance_hu: 75
+
+wall_from_fat:
+  enabled: true
+  outer_limit_mm: 5
+  close_radius_mm: 3
+  lumen_core_distance_mm: 5
+  centerline_core_radius_mm: 2
+  contrast_lower_margin_hu: 0
+  min_lumen_hu: 375
+  max_lumen_hu_above_reference: 300
+  lumen_reference_lower_fraction: 0.0
+  lumen_reference_upper_fraction: 0.20
+  lumen_reference_statistic: mean
+  require_lumen_seed_connectivity: true
+  use_input_aorta_as_lumen_floor: true
+  smooth_lumen_profile_mm: 10
+  min_core_voxels_per_slice: 20
+  wall_hu_min: -30
+  wall_hu_max: 1200
+  exclude_fat_from_wall: true
+  exclude_calcification_hu: 500
+  include_calcification_in_wall: true
+  lumen_correction_enabled: true
+  lumen_correction_outer_mm: 1
+  lumen_correction_close_radius_mm: 0
+  lumen_correction_lower_margin_hu: 0
+  lumen_correction_min_hu: 375
+  lumen_correction_max_above_reference_hu: 300
+  save_masks: true

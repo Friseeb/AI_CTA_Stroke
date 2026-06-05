@@ -1,0 +1,67 @@
+radiomics:
+  enabled: false
+
+encoders:
+  enabled: false
+
+geometry:
+  enabled: false
+
+wall_morphology:
+  enabled: false
+
+lumen_protrusions:
+  enabled: false
+
+calcification:
+  enabled: false
+  dynamic_wall:
+    enabled: false
+
+shells:
+  base: []
+
+fat_omics:
+  enabled: true
+  external_radius_mm: 5
+  adipose_hu_min: -190
+  adipose_hu_max: -30
+  radial_bins_mm:
+    - [0, 2]
+    - [2, 5]
+  save_mask: true
+
+wall_from_fat:
+  enabled: true
+  outer_limit_mm: 5
+  close_radius_mm: 3
+  lumen_core_distance_mm: 5
+  centerline_core_radius_mm: 2
+  contrast_lower_margin_hu: 0
+  min_lumen_hu: 375
+  max_lumen_hu_above_reference: 300
+  lumen_reference_lower_fraction: 0.0
+  lumen_reference_upper_fraction: 0.20
+  lumen_reference_statistic: mean
+  require_lumen_seed_connectivity: true
+  use_input_aorta_as_lumen_floor: true
+  smooth_lumen_profile_mm: 10
+  min_core_voxels_per_slice: 20
+  wall_hu_min: -30
+  wall_hu_max: 1200
+  exclude_fat_from_wall: true
+  exclude_calcification_hu: 500
+  include_calcification_in_wall: true
+  lumen_correction_enabled: true
+  lumen_correction_outer_mm: 1
+  lumen_correction_close_radius_mm: 0
+  lumen_correction_lower_margin_hu: 0
+  lumen_correction_min_hu: 375
+  lumen_correction_max_above_reference_hu: 300
+  save_masks: true
+  protrusions:
+    enabled: false
+
+outputs:
+  save_masks: true
+  save_figures: false

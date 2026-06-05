@@ -1,0 +1,22 @@
+radiomics:
+  enabled: false
+
+encoders:
+  enabled: true
+  device: auto
+  patch_sources:
+    - calcification_500HU
+  max_patches_per_source: 64
+  patch_size_mm_zyx: [12, 32, 32]
+  backends:
+    - name: tap_ct
+      backend: tap_ct_hf
+      model_name: fomofo/tap-ct-b-3d
+      trust_remote_code: true
+      target_shape_zyx: [12, 224, 224]
+      hu_clip: [-1008, 822]
+      normalization_mean: -86.8086
+      normalization_std: 322.6347
+
+outputs:
+  save_figures: true

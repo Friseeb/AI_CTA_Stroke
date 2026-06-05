@@ -97,6 +97,92 @@ def run_qc(
     )
 
 
+def enrich_qc_row(
+    row: dict,
+    *,
+    landmarks,
+    masks_present: dict[str, bool],
+    feature_rows: dict[str, dict],
+) -> dict:
+    """Add v2 per-region coverage + reliability flags to an existing QC row.
+
+    Inputs are intentionally loose to keep this callable from anywhere the
+    orchestrator has already gathered the pieces. Every flag is False
+    unless we can affirmatively prove the region is present.
+    """
+    pts = getattr(landmarks, "points", {}) if landmarks else {}
+    z_levels = getattr(landmarks, "z_levels", {}) if landmarks else {}
+
+    def _has_point(name: str) -> bool:
+        p = pts.get(name)
+        return bool(p and (p.voxel_zyx or p.physical_mm))
+
+    def _has_level(name: str) -> bool:
+        l = z_levels.get(name)
+        return bool(l and (l.z_voxel is not None or l.z_physical_mm is not None))
+
+    row.setdefault("qc_has_hard_palate_region",
+                   _has_level("hard_palate_plane") or _has_point("posterior_nasal_spine"))
+    row.setdefault("qc_has_retropalatal_region", _has_level("retropalatal_level"))
+    row.setdefault("qc_has_retroglossal_region",
+                   _has_level("retroglossal_level") or _has_point("epiglottis_tip"))
+    row.setdefault("qc_has_tongue_region", bool(masks_present.get("tongue", False)))
+    row.setdefault("qc_has_tongue_base_region",
+                   _has_level("tongue_base_level") or _has_point("tongue_base_point"))
+    row.setdefault("qc_has_soft_palate_region",
+                   bool(masks_present.get("soft_palate", False))
+                   or _has_point("uvula_tip"))
+    row.setdefault("qc_has_mandible_region",
+                   bool(masks_present.get("mandible", False)))
+    row.setdefault("qc_has_parapharyngeal_region",
+                   bool(masks_present.get("airway", False)))
+    row.setdefault("qc_has_retropharyngeal_region",
+                   bool(masks_present.get("airway", False)))
+
+    # Mask availability mirrors masks_present
+    row["qc_airway_mask_available"] = bool(masks_present.get("airway", False))
+    row["qc_tongue_mask_available"] = bool(masks_present.get("tongue", False))
+    row["qc_mandible_mask_available"] = bool(masks_present.get("mandible", False))
+    row["qc_hyoid_landmark_available"] = _has_point("hyoid_centroid")
+    row["qc_soft_palate_mask_available"] = bool(masks_present.get("soft_palate", False))
+    row["qc_fat_mask_available"] = bool(masks_present.get("fat", False))
+
+    # Artefact flag is derived from the existing dental_artifact_score
+    art_score = row.get("qc_dental_artifact_score")
+    row["qc_dental_artifact_flag"] = (isinstance(art_score, float)
+                                       and art_score == art_score
+                                       and art_score > 0.001)
+    row.setdefault("qc_motion_artifact_flag", False)
+    row.setdefault("qc_swallow_artifact_flag", False)
+    row.setdefault("qc_low_fov_flag", False)
+    row.setdefault("qc_contrast_phase_flag",
+                   bool(row.get("qc_contrast_enhanced", False)))
+    row.setdefault("qc_streak_artifact_near_tongue_flag", False)
+
+    # Feature-level reliability — default True if the module wrote data,
+    # False if it wrote only empties.
+    def _ok(d: dict, key: str) -> bool:
+        v = d.get(key)
+        return isinstance(v, (int, float)) and v == v
+    row["airway_features_reliable"] = _ok(feature_rows.get("airway", {}),
+                                           "airway_volume_ml")
+    row["tongue_features_reliable"] = _ok(feature_rows.get("tongue", {}),
+                                           "tongue_volume_ml") or \
+        _ok(feature_rows.get("tongue", {}), "tongue_posterior_volume_ml")
+    row["posterior_tongue_hu_reliable"] = _ok(feature_rows.get("tongue", {}),
+                                                "tongue_posterior_mean_hu")
+    row["soft_palate_features_reliable"] = _ok(feature_rows.get("soft_tissue", {}),
+                                                 "soft_palate_volume_ml") or \
+        _ok(feature_rows.get("soft_tissue", {}), "soft_palate_length_mm")
+    row["skeletal_features_reliable"] = _ok(feature_rows.get("skeletal", {}),
+                                              "hyoid_to_c3_distance_mm")
+    row["parapharyngeal_fat_features_reliable"] = _ok(feature_rows.get("fat", {}),
+                                                       "fat_parapharyngeal_total_volume_ml")
+    row["cervical_fat_features_reliable"] = _ok(feature_rows.get("fat", {}),
+                                                  "fat_cervical_volume_ml")
+    return row
+
+
 def qc_to_row(qc: QCResult) -> dict:
     """Flatten a QCResult into the per-case feature row."""
     return {

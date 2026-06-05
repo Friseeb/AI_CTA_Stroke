@@ -10,6 +10,7 @@ import pandas as pd
 
 from . import PIPELINE_NAME, __version__
 from .logging_utils import get_logger
+from .metric_registry import all_metrics, empty_row, feature_names
 from .types import CaseResult
 
 log = get_logger("output")
@@ -41,7 +42,16 @@ def write_outputs(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    rows = [r.to_feature_row() for r in results]
+    # Build rows starting from the registry's empty default row — this
+    # guarantees every column the registry knows about is present, with
+    # registry-defined missing-value defaults, even when a module didn't
+    # populate it.
+    base = empty_row()
+    rows: list[dict] = []
+    for r in results:
+        row = dict(base)
+        row.update(r.to_feature_row())
+        rows.append(row)
     if not rows:
         log.warning("write_outputs called with no results.")
     qc_rows = [r.to_qc_row() for r in results]
@@ -96,15 +106,25 @@ def append_processing_log(
 
 
 def _reorder_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Canonical column order: identifiers + qc explicit groups + registry order.
+
+    For columns NOT in the registry (e.g. dental ``*_from_dental`` aliases,
+    radiomics features whose exact names depend on the PyRadiomics version),
+    we append them alphabetically after the registry-known columns.
+    """
     if df.empty:
         return df
     cols = list(df.columns)
     ordered: list[str] = []
-    for key_group in (_PRIMARY_KEYS, _QC_KEYS):
-        for k in key_group:
-            if k in cols and k not in ordered:
-                ordered.append(k)
-    for k in cols:
-        if k not in ordered:
+    for k in _PRIMARY_KEYS:
+        if k in cols and k not in ordered:
             ordered.append(k)
+    for k in _QC_KEYS:
+        if k in cols and k not in ordered:
+            ordered.append(k)
+    for k in feature_names():  # registry-canonical order for everything else
+        if k in cols and k not in ordered:
+            ordered.append(k)
+    for k in sorted(c for c in cols if c not in ordered):
+        ordered.append(k)
     return df[ordered]
