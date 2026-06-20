@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cta_common"
+version = "0.1.0"
+description = "Shared utilities for the AI_CTA_Stroke pipelines (geometry, io, shells, Slicer/QC, subprocess env)."
+requires-python = ">=3.9"
+dependencies = ["numpy"]
+
+[project.optional-dependencies]
+sitk = ["SimpleITK"]
+shells = ["scipy"]
+test = ["pytest"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+cta_common = ["py.typed"]

@@ -8,6 +8,7 @@ implemented in this module.
 
 from __future__ import annotations
 
+import functools
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +23,24 @@ from .geometry import voxel_volume_mm3
 from .logging_utils import get_logger
 
 log = get_logger("features")
+
+
+@functools.lru_cache(maxsize=None)
+def _read_label_image_array(path_str: str) -> np.ndarray:
+    """Read a label NIfTI as a numpy array, memoized by path.
+
+    Several detectors read the same per-tooth/jaw label files, so caching avoids
+    re-reading each file from disk 5+ times per case. The cache is cleared at the
+    start of every ``extract_features`` call so it stays per-case (no growth or
+    staleness across a batch). Callers copy via ``.astype(...)`` before use, so
+    the cached array is never mutated.
+    """
+    return sitk.GetArrayFromImage(sitk.ReadImage(path_str))
+
+
+def _label_array(path) -> np.ndarray:
+    return _read_label_image_array(str(path))
+
 
 NOT_IMPLEMENTED = [
     "subtle caries (CTA evidence limited; not implemented in v1)",
@@ -104,6 +123,7 @@ def extract_features(
     domain_warnings: Optional[list[str]] = None,
 ) -> FeatureResult:
     warnings_out: list[str] = list(domain_warnings or [])
+    _read_label_image_array.cache_clear()  # per-case label-array cache
     spacing_xyz = hu_image.GetSpacing()
     spacing_ijk = tuple(reversed(spacing_xyz))
     vox_vol = voxel_volume_mm3(spacing_ijk)
@@ -233,7 +253,7 @@ def _detect_teeth_present(
         if not _is_tooth_label(label_name):
             continue
         try:
-            mask = sitk.GetArrayFromImage(sitk.ReadImage(str(label_path))).astype(bool)
+            mask = _label_array(label_path).astype(bool)
         except Exception as exc:
             log.warning("Tooth label read failed (%s): %s", label_name, exc)
             continue
@@ -282,7 +302,7 @@ def _detect_implants(label_files: dict[str, Path], hu_arr: np.ndarray, vox_vol: 
     for label_name in ("implant", "implants"):
         if label_name in label_files:
             try:
-                mask = sitk.GetArrayFromImage(sitk.ReadImage(str(label_files[label_name]))).astype(bool)
+                mask = _label_array(label_files[label_name]).astype(bool)
                 volume = mask.sum() * vox_vol
                 mean_hu = float(hu_arr[mask].mean()) if mask.any() else None
                 result.append({
@@ -302,7 +322,7 @@ def _detect_crowns_bridges(label_files: dict[str, Path], hu_arr: np.ndarray, vox
     for label_name in ("crown", "bridge", "crowns", "bridges", "crown_or_bridge"):
         if label_name in label_files:
             try:
-                mask = sitk.GetArrayFromImage(sitk.ReadImage(str(label_files[label_name]))).astype(bool)
+                mask = _label_array(label_files[label_name]).astype(bool)
                 volume = mask.sum() * vox_vol
                 result.append({
                     "label": label_name,
@@ -342,7 +362,7 @@ def _build_periapical_exclusion_mask(
         if not any(tag in label_name for tag in _PERIAPICAL_EXCLUDE_SUBSTRINGS):
             continue
         try:
-            arr = sitk.GetArrayFromImage(sitk.ReadImage(str(label_path))).astype(bool)
+            arr = _label_array(label_path).astype(bool)
         except Exception as exc:
             log.warning("Could not load exclusion label %s: %s", label_name, exc)
             continue
@@ -397,7 +417,7 @@ def _detect_periapical_lucency(
 
     for label_name, label_path in tooth_labels.items():
         try:
-            tooth_mask = sitk.GetArrayFromImage(sitk.ReadImage(str(label_path))).astype(bool)
+            tooth_mask = _label_array(label_path).astype(bool)
             if not tooth_mask.any():
                 continue
 
@@ -467,12 +487,12 @@ def _detect_periodontal_bone_loss(
     lower_bone: Optional[np.ndarray] = None
     try:
         if upper_bone_path:
-            upper_bone = sitk.GetArrayFromImage(sitk.ReadImage(str(upper_bone_path))).astype(bool)
+            upper_bone = _label_array(upper_bone_path).astype(bool)
     except Exception as exc:
         log.warning("Failed to load upper_jawbone: %s", exc)
     try:
         if lower_bone_path:
-            lower_bone = sitk.GetArrayFromImage(sitk.ReadImage(str(lower_bone_path))).astype(bool)
+            lower_bone = _label_array(lower_bone_path).astype(bool)
     except Exception as exc:
         log.warning("Failed to load lower_jawbone: %s", exc)
 
@@ -494,7 +514,7 @@ def _detect_periodontal_bone_loss(
             continue
 
         try:
-            tooth_mask = sitk.GetArrayFromImage(sitk.ReadImage(str(label_path))).astype(bool)
+            tooth_mask = _label_array(label_path).astype(bool)
             if not tooth_mask.any():
                 continue
 
