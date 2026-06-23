@@ -19,10 +19,13 @@ from __future__ import annotations
 import argparse
 import csv
 import glob as globmod
+import os
 import re
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 # Default to the dental CLI in the totalseg-mac env (has TotalSegmentator).
@@ -32,6 +35,16 @@ DEFAULT_CTA_DENTAL = "/opt/anaconda3/envs/totalseg-mac/bin/cta-dental"
 def case_id_from_path(p: Path) -> str:
     m = re.search(r"(sub-[A-Za-z0-9]+)", p.name)
     return m.group(1) if m else p.name.split(".")[0]
+
+
+def _thread_capped_env(threads: int) -> dict:
+    """Limit each worker's math/nnU-Net threads so N workers don't oversubscribe."""
+    env = dict(os.environ)
+    for var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+                "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"):
+        env[var] = str(threads)
+    env["nnUNet_n_proc_DA"] = str(threads)
+    return env
 
 
 def main() -> None:
@@ -49,8 +62,17 @@ def main() -> None:
     ap.add_argument("--skip-existing", action="store_true")
     ap.add_argument("--reuse-roi-seg", action="store_true",
                     help="Reuse ROI-detection labels as the final segmentation (~2x faster).")
+    ap.add_argument("--slim", action="store_true",
+                    help="After each successful case, delete the redundant intermediates "
+                         "(preprocessed.nii.gz + roi/_roi_input.nii.gz) to save disk.")
     ap.add_argument("--cta-dental", default=DEFAULT_CTA_DENTAL, help="Path to the cta-dental CLI.")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="Run this many cases concurrently (CPU device recommended; MPS is a "
+                         "single GPU and won't parallelize TotalSegmentator).")
+    ap.add_argument("--threads-per-worker", type=int, default=None,
+                    help="Math/nnU-Net threads per worker (default: 12 // workers, min 1).")
     args = ap.parse_args()
+    threads = args.threads_per_worker or max(1, 12 // max(1, args.workers))
 
     if args.glob:
         inputs = [Path(p) for p in sorted(globmod.glob(args.glob))]
@@ -66,49 +88,68 @@ def main() -> None:
     status_csv = outdir / "dental_batch_status.csv"
     write_header = not status_csv.exists()
 
-    print(f"Dental batch: {len(inputs)} case(s) -> {outdir}")
-    with status_csv.open("a", newline="") as fh:
-        writer = csv.writer(fh)
-        if write_header:
-            writer.writerow(["case_id", "input", "status", "returncode", "seconds", "out_dir"])
+    n = len(inputs)
+    env = _thread_capped_env(threads)
+    print(f"Dental batch: {n} case(s) -> {outdir} | workers={args.workers} "
+          f"threads/worker={threads}", flush=True)
 
-        for i, cta in enumerate(inputs, 1):
-            case_id = case_id_from_path(cta)
-            case_out = outdir / case_id
-            if not cta.exists():
-                print(f"[{i}/{len(inputs)}] {case_id}: MISSING input {cta}")
-                writer.writerow([case_id, str(cta), "missing_input", "", "", str(case_out)])
-                fh.flush()
-                continue
+    done = {"i": 0}
+    lock = threading.Lock()
+    fh = status_csv.open("a", newline="")
+    writer = csv.writer(fh)
+    if write_header:
+        writer.writerow(["case_id", "input", "status", "returncode", "seconds", "out_dir"])
+        fh.flush()
 
-            cmd = [
-                args.cta_dental, "run", str(cta),
-                "--out", str(case_out),
-                "--case-id", case_id,
-                "--segmenter", args.segmenter,
-                "--roi-method", args.roi_method,
-                "--deface-mode", args.deface_mode,
-                "--target-spacing", str(args.target_spacing),
-            ]
-            if args.config:
-                cmd += ["--config", args.config]
-            if args.skip_existing:
-                cmd += ["--skip-existing"]
-            if args.reuse_roi_seg:
-                cmd += ["--reuse-roi-seg"]
+    def run_one(cta: Path):
+        case_id = case_id_from_path(cta)
+        case_out = outdir / case_id
+        if not cta.exists():
+            return [case_id, str(cta), "missing_input", "", "", str(case_out)]
+        cmd = [
+            args.cta_dental, "run", str(cta), "--out", str(case_out), "--case-id", case_id,
+            "--segmenter", args.segmenter, "--roi-method", args.roi_method,
+            "--deface-mode", args.deface_mode, "--target-spacing", str(args.target_spacing),
+        ]
+        if args.config:
+            cmd += ["--config", args.config]
+        if args.skip_existing:
+            cmd += ["--skip-existing"]
+        if args.reuse_roi_seg:
+            cmd += ["--reuse-roi-seg"]
 
-            print(f"[{i}/{len(inputs)}] {case_id}: running …", flush=True)
-            t0 = time.time()
-            proc = subprocess.run(cmd, capture_output=True, text=True)
-            dt = time.time() - t0
-            status = "ok" if proc.returncode == 0 else "failed"
+        t0 = time.time()
+        proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        dt = time.time() - t0
+        status = "ok" if proc.returncode == 0 else "failed"
+        if args.slim and proc.returncode == 0:
+            for redundant in (case_out / "preprocessed.nii.gz", case_out / "roi" / "_roi_input.nii.gz"):
+                try:
+                    redundant.unlink(missing_ok=True)
+                except OSError:
+                    pass
+        with lock:
+            done["i"] += 1
+            prefix = f"[{done['i']}/{n}] {case_id}"
             if proc.returncode != 0:
-                tail = "\n".join((proc.stderr or proc.stdout or "").strip().splitlines()[-12:])
-                print(f"    FAILED (rc={proc.returncode}, {dt:.0f}s)\n{tail}")
+                tail = "\n".join((proc.stderr or proc.stdout or "").strip().splitlines()[-8:])
+                print(f"{prefix}: FAILED (rc={proc.returncode}, {dt:.0f}s)\n{tail}", flush=True)
             else:
-                print(f"    {status} in {dt:.0f}s")
-            writer.writerow([case_id, str(cta), status, proc.returncode, f"{dt:.1f}", str(case_out)])
-            fh.flush()
+                print(f"{prefix}: ok in {dt:.0f}s", flush=True)
+        return [case_id, str(cta), status, proc.returncode, f"{dt:.1f}", str(case_out)]
+
+    try:
+        if args.workers <= 1:
+            for cta in inputs:
+                writer.writerow(run_one(cta)); fh.flush()
+        else:
+            with ThreadPoolExecutor(max_workers=args.workers) as ex:
+                futures = [ex.submit(run_one, cta) for cta in inputs]
+                for fut in as_completed(futures):
+                    with lock:
+                        writer.writerow(fut.result()); fh.flush()
+    finally:
+        fh.close()
 
     print(f"Done. Status: {status_csv}")
 
