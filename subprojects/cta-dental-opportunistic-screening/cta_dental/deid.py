@@ -105,6 +105,9 @@ def run_deface(
         log.info("Deface mode=none. No defacing applied.")
         return result
 
+    # All non-"none" modes write into out_dir; ensure it exists first.
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     if cfg.mode == "mask_only":
         log.info("Deface mode=mask_only. Computing face mask (no image alteration).")
         mask = compute_face_mask(image)

@@ -63,6 +63,32 @@ class BaseSegmenter(ABC):
     def domain_notes(self) -> str:
         return ""
 
+    def load_existing(self, output_dir: Path) -> Optional[SegmentationResult]:
+        """Reconstruct a result from a previous run's outputs, or ``None``.
+
+        Used by ``--skip-existing`` to reuse a completed segmentation instead of
+        re-running the (expensive) model. Returns ``None`` when the ``labels.json``
+        manifest is missing/unreadable or any referenced label file is absent, so
+        a half-written output directory is never treated as complete.
+        """
+        manifest = output_dir / "labels.json"
+        if not manifest.is_file():
+            return None
+        try:
+            data = json.loads(manifest.read_text())
+            label_files = {k: Path(v) for k, v in data.get("labels", {}).items()}
+        except (json.JSONDecodeError, OSError):
+            return None
+        if not label_files or not all(p.is_file() for p in label_files.values()):
+            return None
+        return SegmentationResult(
+            success=True,
+            label_map=None,
+            label_files=label_files,
+            labels_json=manifest,
+            meta={"reused_existing": True},
+        )
+
     def _write_labels_json(self, output_dir: Path, label_files: dict[str, Path]) -> Path:
         manifest = {
             "segmenter": self.name,

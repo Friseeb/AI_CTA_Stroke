@@ -8,7 +8,6 @@ implemented in this module.
 
 from __future__ import annotations
 
-import functools
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,26 +19,11 @@ from scipy import ndimage
 
 from .config import FeaturesConfig
 from .geometry import voxel_volume_mm3
+from .imaging_cache import clear_cache as _clear_label_cache
+from .imaging_cache import label_array as _label_array
 from .logging_utils import get_logger
 
 log = get_logger("features")
-
-
-@functools.lru_cache(maxsize=None)
-def _read_label_image_array(path_str: str) -> np.ndarray:
-    """Read a label NIfTI as a numpy array, memoized by path.
-
-    Several detectors read the same per-tooth/jaw label files, so caching avoids
-    re-reading each file from disk 5+ times per case. The cache is cleared at the
-    start of every ``extract_features`` call so it stays per-case (no growth or
-    staleness across a batch). Callers copy via ``.astype(...)`` before use, so
-    the cached array is never mutated.
-    """
-    return sitk.GetArrayFromImage(sitk.ReadImage(path_str))
-
-
-def _label_array(path) -> np.ndarray:
-    return _read_label_image_array(str(path))
 
 
 NOT_IMPLEMENTED = [
@@ -123,7 +107,7 @@ def extract_features(
     domain_warnings: Optional[list[str]] = None,
 ) -> FeatureResult:
     warnings_out: list[str] = list(domain_warnings or [])
-    _read_label_image_array.cache_clear()  # per-case label-array cache
+    _clear_label_cache()  # per-case label-array cache (shared with qc)
     spacing_xyz = hu_image.GetSpacing()
     spacing_ijk = tuple(reversed(spacing_xyz))
     vox_vol = voxel_volume_mm3(spacing_ijk)

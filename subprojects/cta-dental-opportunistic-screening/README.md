@@ -41,6 +41,13 @@ pip install cta-dental-opportunistic-screening
 pip install -e ".[dicom,dev]"
 ```
 
+This package depends on the repo's shared `cta_common` utilities (geometry/IO),
+which are not published to PyPI. When installing from source, also install it:
+
+```bash
+pip install -e ../../cta_common   # from this subproject dir
+```
+
 Requires Python ≥ 3.10.
 
 Core Python dependencies (installed automatically):
@@ -151,20 +158,23 @@ cta-dental features /data/nifti/patient001.nii.gz \
 
 ### Full pipeline (recommended)
 ```bash
-cta-dental run \
-  --input /data/dicoms/patient001/ \
+cta-dental run /data/dicoms/patient001/ \
   --out /data/outputs/patient001/ \
   --case-id patient001 \
   --roi-method totalseg_teeth \
   --segmenter totalseg_teeth \
   --target-spacing 0.5 \
-  --deface-mode mask_only
+  --deface-mode mask_only \
+  --skip-existing            # reuse a completed segmentation if present (skips re-running the model)
 ```
+
+`--skip-existing` reuses a prior segmentation in the output dir (validated via its
+`labels.json` manifest) instead of re-running the model — useful when re-running a
+case to iterate on ROI/features/QC. It is off by default.
 
 ### Full pipeline with DentalSegmentator backend
 ```bash
-cta-dental run \
-  --input /data/dicoms/patient001/ \
+cta-dental run /data/dicoms/patient001/ \
   --out /data/outputs/patient001/ \
   --case-id patient001 \
   --roi-method dentalsegmentator_coarse \
@@ -176,8 +186,7 @@ cta-dental run \
 
 ### Threshold fallback (no external models required — degraded mode)
 ```bash
-cta-dental run \
-  --input /data/nifti/patient001.nii.gz \
+cta-dental run /data/nifti/patient001.nii.gz \
   --out /data/outputs/patient001/ \
   --case-id patient001 \
   --roi-method threshold_fallback \

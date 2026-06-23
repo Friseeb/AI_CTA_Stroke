@@ -43,3 +43,6 @@ test_data/
 tmp_*
 *.tmp
 *.log
+
+# Vendored ADN clone + pretrained weights (MAR POC; not tracked)
+external/adn/

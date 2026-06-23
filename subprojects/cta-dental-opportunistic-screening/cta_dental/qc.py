@@ -19,6 +19,7 @@ import numpy as np
 import SimpleITK as sitk
 
 from .config import QCConfig
+from .imaging_cache import label_array
 from .logging_utils import get_logger
 
 log = get_logger("qc")
@@ -128,9 +129,10 @@ def _merge_labels(
         if path is None:
             continue
         try:
-            label_img = sitk.ReadImage(str(path))
-            label_arr = sitk.GetArrayFromImage(label_img)
+            label_arr = label_array(path)  # shared per-case cache (with features)
             if label_arr.shape != ref_arr.shape:
+                # rare: label not in reference space — resample (read fresh)
+                label_img = sitk.ReadImage(str(path))
                 label_img = sitk.Resample(
                     label_img, reference,
                     sitk.Transform(),

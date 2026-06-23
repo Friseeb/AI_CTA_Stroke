@@ -315,6 +315,16 @@ def run(
     case_id: Annotated[str, typer.Option("--case-id")] = "unknown",
     roi_method: Annotated[str, typer.Option("--roi-method")] = "totalseg_teeth",
     segmenter_backend: Annotated[str, typer.Option("--segmenter")] = "totalseg_teeth",
+    skip_existing: Annotated[bool, typer.Option(
+        "--skip-existing/--no-skip-existing",
+        help="Reuse a completed segmentation in the output dir instead of re-running the model.",
+    )] = False,
+    reuse_roi_seg: Annotated[bool, typer.Option(
+        "--reuse-roi-seg/--no-reuse-roi-seg",
+        help="When the ROI method and segmenter are the same TotalSegmentator task, reuse the "
+             "ROI-detection labels as the final segmentation (cropped to the ROI) instead of "
+             "running TotalSegmentator a second time. ~2x faster; results may differ slightly.",
+    )] = False,
     target_spacing: Annotated[float, typer.Option("--target-spacing")] = 0.5,
     deface_mode: Annotated[str, typer.Option("--deface-mode")] = "mask_only",
     dentalseg_weights: Annotated[Optional[str], typer.Option("--dentalseg-weights")] = None,
@@ -493,12 +503,33 @@ def run(
     else:
         seg = _build_segmenter(segmenter_backend, cfg)
         seg_out = out / "segmentations" / seg.name
-        console.print(f"Running segmenter [bold]{seg.name}[/bold] …")
-        seg_result = seg.run(
-            input_nifti=seg_image_path,
-            output_dir=seg_out,
-            config=cfg.segmentation.model_dump(),
+        roi_seg_dir = roi_out / f"_tseg_{_ROI_TASK.get(roi_method, '')}"
+        can_reuse_roi = (
+            reuse_roi_seg
+            and segmenter_backend == roi_method
+            and segmenter_backend in _ROI_TASK
+            and roi_seg_dir.is_dir()
+            and any(roi_seg_dir.glob("*.nii.gz"))
         )
+        seg_result = seg.load_existing(seg_out) if skip_existing else None
+        if seg_result is not None:
+            console.print(
+                f"[green]Reusing existing {seg.name} segmentation[/green] "
+                f"({len(seg_result.label_files)} labels) — --skip-existing."
+            )
+        elif can_reuse_roi:
+            console.print(
+                "[green]Reusing ROI-detection labels as final segmentation[/green] "
+                "(--reuse-roi-seg; skips a 2nd TotalSegmentator run)."
+            )
+            seg_result = _reuse_roi_segmentation(roi_seg_dir, roi_image, seg, seg_out)
+        else:
+            console.print(f"Running segmenter [bold]{seg.name}[/bold] …")
+            seg_result = seg.run(
+                input_nifti=seg_image_path,
+                output_dir=seg_out,
+                config=cfg.segmentation.model_dump(),
+            )
         domain_warnings = seg_result.domain_warnings
         for w in domain_warnings:
             console.print(f"[yellow]DOMAIN WARNING:[/yellow] {w}")
@@ -584,6 +615,45 @@ def run(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# ROI method -> TotalSegmentator task name (for --reuse-roi-seg matching).
+_ROI_TASK = {"totalseg_teeth": "teeth", "totalseg_craniofacial": "craniofacial_structures"}
+
+
+def _reuse_roi_segmentation(roi_seg_dir: Path, roi_image, seg, seg_out: Path):
+    """Build a final segmentation by cropping the ROI-detection labels to the ROI.
+
+    Avoids a second TotalSegmentator inference when the ROI method and segmenter
+    use the same task. Each ROI label (full analysis space) is resampled to the
+    ROI-crop geometry (nearest-neighbor) and written to ``seg_out``, mirroring the
+    layout produced by ``seg.run`` so features/QC consume it unchanged.
+    """
+    import SimpleITK as sitk
+
+    from .segmenters.base import SegmentationResult
+
+    seg_out.mkdir(parents=True, exist_ok=True)
+    label_files: dict[str, Path] = {}
+    for src in sorted(roi_seg_dir.glob("*.nii.gz")):
+        if src.name.startswith("_"):
+            continue
+        lbl = sitk.ReadImage(str(src))
+        cropped = sitk.Resample(
+            lbl, roi_image, sitk.Transform(), sitk.sitkNearestNeighbor, 0, lbl.GetPixelID()
+        )
+        dst = seg_out / src.name
+        sitk.WriteImage(cropped, str(dst), useCompression=True)
+        label_files[src.name.replace(".nii.gz", "")] = dst
+
+    labels_json = seg._write_labels_json(seg_out, label_files)
+    return SegmentationResult(
+        success=True,
+        label_map=None,
+        label_files=label_files,
+        labels_json=labels_json,
+        meta={"reused_roi_segmentation": True, "n_labels": len(label_files)},
+    )
+
 
 def _build_segmenter(name: str, cfg: PipelineConfig):
     from .segmenters.dentalsegmentator import DentalSegmentatorSegmenter
