@@ -26,6 +26,11 @@ class ROIConfig(BaseModel):
     ] = "totalseg_teeth"
     margin_mm: float = 20.0
     threshold_fallback_hu: float = 700.0
+    # Sanity gate: a single tooth label cannot plausibly span more than this.
+    # On out-of-domain contrast CTA, TotalSegmentator-teeth sometimes smears a
+    # tooth across the whole scan; such cases are failed instead of yielding a
+    # whole-volume "dentition ROI". Set <= 0 to disable.
+    max_tooth_extent_mm: float = 40.0
 
 
 class DefaceConfig(BaseModel):

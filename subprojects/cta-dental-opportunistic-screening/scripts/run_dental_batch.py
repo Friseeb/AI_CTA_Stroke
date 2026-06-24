@@ -71,6 +71,10 @@ def main() -> None:
                          "single GPU and won't parallelize TotalSegmentator).")
     ap.add_argument("--threads-per-worker", type=int, default=None,
                     help="Math/nnU-Net threads per worker (default: 12 // workers, min 1).")
+    ap.add_argument("--timeout", type=int, default=1200,
+                    help="Per-case timeout (s). A stuck case (e.g. a dropped /Volumes mount) "
+                         "is killed and marked 'timeout' so it can't hang the batch; "
+                         "--skip-existing resumes it later. 0 disables.")
     args = ap.parse_args()
     threads = args.threads_per_worker or max(1, 12 // max(1, args.workers))
 
@@ -119,10 +123,17 @@ def main() -> None:
             cmd += ["--reuse-roi-seg"]
 
         t0 = time.time()
-        proc = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, env=env,
+                                  timeout=args.timeout or None)
+            rc, stderr, stdout = proc.returncode, proc.stderr, proc.stdout
+        except subprocess.TimeoutExpired as exc:
+            # A single stuck case (e.g. a dropped /Volumes mount) must not hang the
+            # whole batch. Mark it timeout and move on; --skip-existing resumes it.
+            rc, stderr, stdout = 124, f"timeout after {args.timeout}s", (exc.stdout or "")
         dt = time.time() - t0
-        status = "ok" if proc.returncode == 0 else "failed"
-        if args.slim and proc.returncode == 0:
+        status = "ok" if rc == 0 else ("timeout" if rc == 124 else "failed")
+        if args.slim and rc == 0:
             for redundant in (case_out / "preprocessed.nii.gz", case_out / "roi" / "_roi_input.nii.gz"):
                 try:
                     redundant.unlink(missing_ok=True)
@@ -131,12 +142,12 @@ def main() -> None:
         with lock:
             done["i"] += 1
             prefix = f"[{done['i']}/{n}] {case_id}"
-            if proc.returncode != 0:
-                tail = "\n".join((proc.stderr or proc.stdout or "").strip().splitlines()[-8:])
-                print(f"{prefix}: FAILED (rc={proc.returncode}, {dt:.0f}s)\n{tail}", flush=True)
+            if rc != 0:
+                tail = "\n".join((stderr or stdout or "").strip().splitlines()[-8:])
+                print(f"{prefix}: {status.upper()} (rc={rc}, {dt:.0f}s)\n{tail}", flush=True)
             else:
                 print(f"{prefix}: ok in {dt:.0f}s", flush=True)
-        return [case_id, str(cta), status, proc.returncode, f"{dt:.1f}", str(case_out)]
+        return [case_id, str(cta), status, rc, f"{dt:.1f}", str(case_out)]
 
     try:
         if args.workers <= 1:

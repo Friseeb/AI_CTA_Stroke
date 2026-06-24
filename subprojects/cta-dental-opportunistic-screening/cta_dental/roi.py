@@ -40,6 +40,34 @@ _CRANIOFACIAL_ROI_STEMS = {
     "maxilla", "skull_base",
 }
 
+# Substrings identifying individual tooth labels (for the smear sanity check).
+_TOOTH_LABEL_KEYS = ("molar", "incisor", "canine", "premolar", "fdi")
+
+
+def _max_tooth_extent_mm(label_files, spacing_xyz) -> tuple[float, Optional[str]]:
+    """Largest single-tooth bounding-box extent (mm) across individual tooth labels.
+
+    A real tooth is ~10-30 mm; a much larger extent means TotalSegmentator-teeth
+    smeared that label across the volume (out-of-domain failure on contrast CTA).
+    """
+    sx, sy, sz = (float(s) for s in spacing_xyz)  # ITK order x, y, z
+    worst, worst_name = 0.0, None
+    for f in label_files:
+        if not any(k in f.stem.lower() for k in _TOOTH_LABEL_KEYS):
+            continue
+        arr = sitk.GetArrayFromImage(sitk.ReadImage(str(f)))  # array order z, y, x
+        nz = np.argwhere(arr > 0)
+        if nz.size == 0:
+            continue
+        ext = max(
+            (nz[:, 0].max() - nz[:, 0].min() + 1) * sz,
+            (nz[:, 1].max() - nz[:, 1].min() + 1) * sy,
+            (nz[:, 2].max() - nz[:, 2].min() + 1) * sx,
+        )
+        if ext > worst:
+            worst, worst_name = ext, f.stem
+    return worst, worst_name
+
 
 @dataclass
 class ROIResult:
@@ -147,6 +175,21 @@ def _roi_totalseg(
     if not selected:
         log.warning("No dental/jaw labels found by TotalSegmentator %s; using all labels.", task)
         selected = label_files
+
+    # Sanity gate: reject smeared teeth segmentations (a single tooth spanning the
+    # whole scan) so we fail honestly instead of yielding a whole-volume ROI.
+    if task == "teeth" and cfg.max_tooth_extent_mm and cfg.max_tooth_extent_mm > 0:
+        max_ext, name = _max_tooth_extent_mm(label_files, image.GetSpacing())
+        if max_ext > cfg.max_tooth_extent_mm:
+            msg = (f"Teeth segmentation implausible: label '{name}' spans {max_ext:.0f} mm "
+                   f"(> {cfg.max_tooth_extent_mm:.0f} mm max). TotalSegmentator-teeth likely "
+                   f"failed on this CTA (out-of-domain); dentition ROI not trustworthy.")
+            log.warning(msg)
+            return ROIResult(
+                success=False, roi_image=None, roi_mask=None,
+                bbox_voxel=None, bbox_physical=None,
+                roi_quality="failed", method_used=f"totalseg_{task}", errors=[msg],
+            )
 
     return _build_roi_from_label_files(
         image=image,
