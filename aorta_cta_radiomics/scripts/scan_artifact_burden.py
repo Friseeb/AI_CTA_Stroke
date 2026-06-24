@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -31,8 +32,11 @@ BATCH = REPO / "aorta_cta_radiomics" / "outputs" / "aorta_batch_run" / "cases"
 
 
 def resolve_cta(case: str) -> Path | None:
-    for p in [REPO / "data" / f"{case}_acq-CTA_ct.nii.gz",
-              Path(f"/Volumes/DICOM5/slaobids/{case}_acq-CTA_ct.nii.gz")]:
+    candidates = [REPO / "data" / f"{case}_acq-CTA_ct.nii.gz"]
+    slaobids = os.environ.get("SLAOBIDS_DIR")
+    if slaobids:
+        candidates.append(Path(slaobids) / f"{case}_acq-CTA_ct.nii.gz")
+    for p in candidates:
         if p.exists():
             return p
     return None

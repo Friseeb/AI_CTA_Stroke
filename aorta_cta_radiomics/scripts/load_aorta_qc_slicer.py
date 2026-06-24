@@ -15,7 +15,10 @@ from pathlib import Path
 import slicer
 import vtk
 
-REPO_ROOT = Path("/Users/sebastianfridman/Documents/pwd/AI_CTA_Stroke")
+# Repo root: CTA_STROKE_REPO env override, else inferred from this file's location.
+_here = Path(globals().get("__file__", "")).resolve()
+REPO_ROOT = Path(os.environ.get("CTA_STROKE_REPO") or
+                 (_here.parents[2] if _here.name else Path.cwd()))
 
 # Shared mask-alignment helper. Slicer's embedded Python lacks the editable
 # install, so bootstrap cta_common's source dir onto sys.path.
@@ -35,11 +38,10 @@ else:
     CASE = os.environ.get("AORTA_QC_CASE", "sub-547")
 MASKS_DIR = REPO_ROOT / "aorta_cta_radiomics/outputs/aorta_batch_run/cases" / CASE / "masks" / CASE
 
-# CTA: prefer a local copy, fall back to the slaobids volume on the external disk.
-CTA_CANDIDATES = [
-    REPO_ROOT / "data" / f"{CASE}_acq-CTA_ct.nii.gz",
-    Path(f"/Volumes/DICOM5/slaobids/{CASE}_acq-CTA_ct.nii.gz"),
-]
+# CTA: prefer a local copy; optionally fall back to a source dir from SLAOBIDS_DIR.
+CTA_CANDIDATES = [REPO_ROOT / "data" / f"{CASE}_acq-CTA_ct.nii.gz"]
+if os.environ.get("SLAOBIDS_DIR"):
+    CTA_CANDIDATES.append(Path(os.environ["SLAOBIDS_DIR"]) / f"{CASE}_acq-CTA_ct.nii.gz")
 
 # (display name, filename suffix after "<case>_", RGB, 2D-fill opacity)
 SEG_MASKS = [

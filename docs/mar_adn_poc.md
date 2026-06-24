@@ -41,7 +41,7 @@ gdown 1NqZtEDGMNemy5mWyzTU-6vIAVIk_Ht-N -O external/adn/runs/deep_lesion/deep_le
 Run in `totalseg-mac` (torch 2.x + the usual imaging deps). Extra deps:
 
 ```bash
-/opt/anaconda3/envs/totalseg-mac/bin/python -m pip install gdown "googledrivedownloader==0.4"
+python -m pip install gdown "googledrivedownloader==0.4"
 ```
 
 ## Patches needed for torch 2.x / modern matplotlib
@@ -58,7 +58,7 @@ CPU/MPS — re-apply after cloning:
 
 ```bash
 cd external/adn
-/opt/anaconda3/envs/totalseg-mac/bin/python demo.py spineweb --no_gpu   # bundled samples
+python demo.py spineweb --no_gpu   # bundled samples
 ```
 
 For the contrast-CTA domain-shift test on a case slice, the POC script lived at

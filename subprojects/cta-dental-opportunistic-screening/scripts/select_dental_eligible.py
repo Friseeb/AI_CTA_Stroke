@@ -8,7 +8,7 @@ manifest of eligible CTA paths (one per line) plus a classification CSV with rea
 
 Example:
   python scripts/select_dental_eligible.py \
-      --dir /Volumes/DICOM5/slaobids \
+      --dir /path/to/slaobids \
       --out-manifest outputs/dental_eligible.txt \
       --out-csv outputs/dental_eligibility.csv
 """

@@ -8,7 +8,7 @@ time to ``<outdir>/dental_batch_status.csv``. Resumable via --skip-existing
 
 Example:
   python scripts/run_dental_batch.py \
-      --glob '/Volumes/DICOM5/slaobids/*_acq-CTA_ct.nii.gz' \
+      --glob '/path/to/slaobids/*_acq-CTA_ct.nii.gz' \
       --outdir outputs/dental_slaobids_pilot \
       --config configs/pilot_mps.yaml \
       --limit 3 --skip-existing
@@ -28,8 +28,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-# Default to the dental CLI in the totalseg-mac env (has TotalSegmentator).
-DEFAULT_CTA_DENTAL = "/opt/anaconda3/envs/totalseg-mac/bin/cta-dental"
+# Dental CLI: CTA_DENTAL_BIN env override, else resolve `cta-dental` on PATH
+# (run inside the env that has TotalSegmentator, or pass --cta-dental).
+DEFAULT_CTA_DENTAL = os.environ.get("CTA_DENTAL_BIN") or "cta-dental"
 
 
 def case_id_from_path(p: Path) -> str:

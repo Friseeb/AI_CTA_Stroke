@@ -99,7 +99,7 @@ def _default_pilot_root() -> str:
     """Best-effort default pilot root for the output folder."""
     for guess in (
         os.environ.get("LAA_PILOT_ROOT"),
-        "/Users/sebastianfridman/Documents/pwd/AI_CTA_Stroke/outputs/laa_pilot",
+        str(_REPO_ROOT / "outputs" / "laa_pilot"),
     ):
         if guess and os.path.isdir(guess):
             return guess
