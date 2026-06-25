@@ -264,6 +264,8 @@ def qc(
     roi_mask: Annotated[Optional[Path], typer.Option("--roi-mask")] = None,
     labels_dir: Annotated[Optional[Path], typer.Option("--labels-dir")] = None,
     segmenter: Annotated[str, typer.Option("--segmenter")] = "unknown",
+    open_slicer: Annotated[bool, typer.Option("--open-slicer/--no-open-slicer",
+        help="Launch 3D Slicer to view the scene (default off).")] = False,
     verbose: _VerboseOpt = False,
     config: _ConfigOpt = None,
 ) -> None:
@@ -299,7 +301,8 @@ def qc(
     scene = qc_paths.get("scene", qc_paths.get("roi_scene"))
     if scene:
         console.print(f"[green]Slicer scene:[/green] {scene}")
-        open_slicer_scene(scene)
+        if open_slicer:
+            open_slicer_scene(scene)
     else:
         console.print(f"[green]QC written to[/green] {out}")
 
@@ -324,6 +327,11 @@ def run(
         help="When the ROI method and segmenter are the same TotalSegmentator task, reuse the "
              "ROI-detection labels as the final segmentation (cropped to the ROI) instead of "
              "running TotalSegmentator a second time. ~2x faster; results may differ slightly.",
+    )] = False,
+    open_slicer: Annotated[bool, typer.Option(
+        "--open-slicer/--no-open-slicer",
+        help="Launch 3D Slicer to view the QC scene when done. OFF by default — never use in "
+             "batch: each launched Slicer holds the GPU/MPS and starves TotalSegmentator.",
     )] = False,
     target_spacing: Annotated[float, typer.Option("--target-spacing")] = 0.5,
     deface_mode: Annotated[str, typer.Option("--deface-mode")] = "mask_only",
@@ -604,7 +612,8 @@ def run(
     console.print(f"Features:         [cyan]{features_path}[/cyan]")
     if slicer_scene:
         console.print(f"Open in Slicer:   [cyan]{slicer_scene}[/cyan]")
-        open_slicer_scene(Path(slicer_scene))
+        if open_slicer:
+            open_slicer_scene(Path(slicer_scene))
     if all_warnings:
         console.print(f"[yellow]Warnings ({len(all_warnings)}):[/yellow]")
         for w in all_warnings[:5]:

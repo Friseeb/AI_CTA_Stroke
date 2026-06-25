@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import csv
 import glob as globmod
+import json
 import os
 import re
 import subprocess
@@ -61,6 +62,11 @@ def main() -> None:
     ap.add_argument("--target-spacing", type=float, default=0.5)
     ap.add_argument("--limit", type=int, default=None, help="Process only the first N inputs.")
     ap.add_argument("--skip-existing", action="store_true")
+    ap.add_argument("--resume", dest="resume", default=True, action="store_true",
+                    help="Batch-level resume: skip any case that already has a report.json "
+                         "(processed in a prior run), so an interrupted batch continues from "
+                         "where it stopped instead of re-running completed cases. Default on.")
+    ap.add_argument("--no-resume", dest="resume", action="store_false")
     ap.add_argument("--reuse-roi-seg", action="store_true",
                     help="Reuse ROI-detection labels as the final segmentation (~2x faster).")
     ap.add_argument("--slim", action="store_true",
@@ -111,6 +117,16 @@ def main() -> None:
         case_out = outdir / case_id
         if not cta.exists():
             return [case_id, str(cta), "missing_input", "", "", str(case_out)]
+        # Batch-level resume: a case with a report.json was already processed.
+        if args.resume and (case_out / "report.json").exists():
+            try:
+                st = json.loads((case_out / "report.json").read_text()).get("status", "?")
+            except Exception:
+                st = "?"
+            with lock:
+                done["i"] += 1
+                print(f"[{done['i']}/{n}] {case_id}: resume-skip (done: {st})", flush=True)
+            return [case_id, str(cta), f"resume_skip:{st}", 0, "0.0", str(case_out)]
         cmd = [
             args.cta_dental, "run", str(cta), "--out", str(case_out), "--case-id", case_id,
             "--segmenter", args.segmenter, "--roi-method", args.roi_method,

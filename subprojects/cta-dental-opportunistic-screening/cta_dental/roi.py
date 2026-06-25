@@ -44,19 +44,41 @@ _CRANIOFACIAL_ROI_STEMS = {
 _TOOTH_LABEL_KEYS = ("molar", "incisor", "canine", "premolar", "fdi")
 
 
+def _largest_component(mask: np.ndarray) -> np.ndarray:
+    """Keep only the largest connected component, dropping scattered noise specks.
+
+    TotalSegmentator-teeth on out-of-domain contrast CTA emits tooth labels as a
+    real tooth blob plus tiny false-positive specks far away, which inflate the
+    label's bounding box (a premolar "spanning" 80+ mm is 3 specks, the biggest
+    ~2 mm). Reducing each label to its largest component recovers the true extent.
+    """
+    from scipy import ndimage as ndi
+
+    if not mask.any():
+        return mask
+    lbl, n = ndi.label(mask)
+    if n <= 1:
+        return mask
+    sizes = np.bincount(lbl.ravel())
+    sizes[0] = 0
+    return lbl == int(np.argmax(sizes))
+
+
 def _max_tooth_extent_mm(label_files, spacing_xyz) -> tuple[float, Optional[str]]:
     """Largest single-tooth bounding-box extent (mm) across individual tooth labels.
 
-    A real tooth is ~10-30 mm; a much larger extent means TotalSegmentator-teeth
-    smeared that label across the volume (out-of-domain failure on contrast CTA).
+    A real tooth is ~10-30 mm. Each label is first reduced to its largest connected
+    component so scattered false-positive specks don't inflate the extent; a still-
+    large extent then means a genuinely smeared label (no real dentition).
     """
     sx, sy, sz = (float(s) for s in spacing_xyz)  # ITK order x, y, z
     worst, worst_name = 0.0, None
     for f in label_files:
         if not any(k in f.stem.lower() for k in _TOOTH_LABEL_KEYS):
             continue
-        arr = sitk.GetArrayFromImage(sitk.ReadImage(str(f)))  # array order z, y, x
-        nz = np.argwhere(arr > 0)
+        arr = sitk.GetArrayFromImage(sitk.ReadImage(str(f))) > 0  # array order z, y, x
+        arr = _largest_component(arr)
+        nz = np.argwhere(arr)
         if nz.size == 0:
             continue
         ext = max(
@@ -349,6 +371,9 @@ def _build_roi_from_label_files(
     for lf in label_files:
         try:
             lmask = sitk.GetArrayFromImage(sitk.ReadImage(str(lf))).astype(bool)
+            # Drop scattered false-positive specks so the ROI bbox is built from
+            # the real teeth/bone, not noise far away (which would inflate it).
+            lmask = _largest_component(lmask)
             combined_mask = lmask if combined_mask is None else (combined_mask | lmask)
         except Exception as exc:
             log.warning("Could not read label file %s: %s", lf, exc)

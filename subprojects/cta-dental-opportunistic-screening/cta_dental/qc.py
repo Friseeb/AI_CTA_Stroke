@@ -9,6 +9,7 @@ Outputs (per run):
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import textwrap
@@ -48,7 +49,14 @@ def open_slicer_scene(scene_path: Path) -> bool:
 
     Uses --python-script which is reliable across Slicer versions.
     Falls back to --python-code loadScene() if no load script exists.
+
+    Hard safety gate: never launches unless CTA_DENTAL_OPEN_SLICER=1. Each Slicer
+    holds the GPU/MPS, so auto-launching per case in a batch starves
+    TotalSegmentator and hangs it. Opt in explicitly for interactive single-case use.
     """
+    if os.environ.get("CTA_DENTAL_OPEN_SLICER") != "1":
+        log.info("Slicer auto-open disabled (set CTA_DENTAL_OPEN_SLICER=1 to enable).")
+        return False
     exe = _find_slicer()
     if exe is None:
         log.warning("3D Slicer not found — cannot auto-open scene.")
