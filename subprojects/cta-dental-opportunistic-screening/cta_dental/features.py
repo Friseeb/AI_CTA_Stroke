@@ -143,7 +143,8 @@ def extract_features(
     markers["implants_candidate"] = _detect_implants(
         label_files, hu_arr, vox_vol, min_volume_mm3=cfg.candidate_min_volume_mm3)
     markers["crowns_or_bridges_candidate"] = _detect_crowns_bridges(
-        label_files, hu_arr, vox_vol, min_volume_mm3=cfg.candidate_min_volume_mm3)
+        label_files, hu_arr, vox_vol, min_volume_mm3=cfg.crown_min_volume_mm3,
+        min_median_hu=cfg.crown_min_median_hu)
     markers["periapical_lucency_candidate"] = _detect_periapical_lucency(
         label_files, hu_arr, spacing_ijk, vox_vol, cfg
     )
@@ -307,7 +308,16 @@ def _detect_implants(label_files: dict[str, Path], hu_arr: np.ndarray, vox_vol: 
 
 
 def _detect_crowns_bridges(label_files: dict[str, Path], hu_arr: np.ndarray, vox_vol: float,
-                           min_volume_mm3: float = 20.0) -> list[dict]:
+                           min_volume_mm3: float = 200.0, min_median_hu: float = 3000.0) -> list[dict]:
+    """Crown/bridge candidates from a segmentation 'crown' label.
+
+    TotalSegmentator's crown class over-labels on CTA: it cannot separate a
+    metal/ceramic restoration from dense natural enamel and occasionally smears
+    onto a few mislabelled voxels. Density does separate them, though — on this
+    cohort enamel/saturation tops out at a median ≈ 3000 HU while metal/ceramic
+    crowns read far higher (median ≈ 4700–11600 HU), so we require both a
+    substantial restoration volume and a supra-enamel median HU.
+    """
     result = []
     for label_name in ("crown", "bridge", "crowns", "bridges", "crown_or_bridge"):
         if label_name in label_files:
@@ -316,11 +326,18 @@ def _detect_crowns_bridges(label_files: dict[str, Path], hu_arr: np.ndarray, vox
                 volume = mask.sum() * vox_vol
                 if volume < min_volume_mm3:  # empty/negligible label — skip
                     continue
+                median_hu = float(np.median(hu_arr[mask]))
+                if median_hu < min_median_hu:  # dense enamel / mislabel, not a restoration
+                    continue
                 result.append({
                     "label": label_name,
                     "volume_mm3": round(volume, 1),
+                    "median_hu": round(median_hu, 1),
                     "confidence": "low",
-                    "notes": "Crown/bridge candidate from segmentation label.",
+                    "notes": (
+                        f"Crown/bridge candidate from segmentation label "
+                        f"(median {median_hu:.0f} HU >= {min_median_hu:.0f}, supra-enamel)."
+                    ),
                 })
             except Exception as exc:
                 log.warning("Crown/bridge label read failed: %s", exc)
@@ -405,7 +422,22 @@ def _detect_periapical_lucency(
         )
 
     search_radius_vox = [max(1, int(cfg.periapical_search_radius_mm / s)) for s in spacing_ijk]
-    hu_band = (hu_arr < cfg.periapical_low_hu_threshold) & (hu_arr > cfg.periapical_air_hu_threshold)
+    hu_band = (hu_arr < cfg.periapical_lesion_hu_max) & (hu_arr > cfg.periapical_lesion_hu_min)
+
+    # Jawbone mask for the intra-osseous (encasement) constraint: a real periapical
+    # lucency is a low-density defect surrounded by alveolar bone, not a soft-tissue
+    # blob open to the gingiva/oral cavity.
+    jawbone = np.zeros(hu_arr.shape, dtype=bool)
+    for bone_key in ("upper_jawbone", "lower_jawbone"):
+        if bone_key in label_files:
+            try:
+                arr = _label_array(label_files[bone_key]).astype(bool)
+                if arr.shape == hu_arr.shape:
+                    jawbone |= arr
+            except Exception as exc:
+                log.warning("Could not load %s for periapical encasement: %s", bone_key, exc)
+    encasement_shell_vox = max(1, int(round(cfg.periapical_bone_shell_mm / min(spacing_ijk))))
+    encasement_struct = ndimage.generate_binary_structure(3, 1)
 
     for label_name, label_path in tooth_labels.items():
         try:
@@ -428,6 +460,17 @@ def _detect_periapical_lucency(
                 volume = comp_mask.sum() * vox_vol
                 if volume < cfg.periapical_min_volume_mm3:
                     continue
+                # Intra-osseous constraint: most of the component's surrounding shell
+                # must be jawbone, else it is a soft-tissue blob (gingiva/PDL/vessel).
+                bone_encasement = 1.0
+                if jawbone.any():
+                    comp_shell = ndimage.binary_dilation(
+                        comp_mask, structure=encasement_struct, iterations=encasement_shell_vox
+                    ) & ~comp_mask
+                    shell_n = int(comp_shell.sum())
+                    bone_encasement = float((comp_shell & jawbone).sum()) / shell_n if shell_n else 0.0
+                    if bone_encasement < cfg.periapical_min_bone_encasement:
+                        continue
                 centroid = np.array(ndimage.center_of_mass(comp_mask)).tolist()
                 mean_hu = float(hu_arr[comp_mask].mean())
                 result.append(CandidateMarker(
@@ -439,9 +482,12 @@ def _detect_periapical_lucency(
                     confidence="low",
                     notes=(
                         f"Experimental periapical lucency candidate adjacent to {label_name}. "
-                        f"HU band ({cfg.periapical_air_hu_threshold:.0f}, "
-                        f"{cfg.periapical_low_hu_threshold:.0f}); anatomical air-spaces "
-                        "(sinus/pharynx/canals) excluded. NOT a diagnosis — verify with "
+                        f"HU band ({cfg.periapical_lesion_hu_min:.0f}, "
+                        f"{cfg.periapical_lesion_hu_max:.0f}); {bone_encasement*100:.0f}% "
+                        "jawbone-encased (intra-osseous); anatomical air-spaces "
+                        "(sinus/pharynx/canals) excluded. OVER-SENSITIVE: cannot be "
+                        "distinguished from normal low-density medullary bone, so this "
+                        "is a screening flag only. NOT a diagnosis — verify with "
                         "dental radiographs."
                     ),
                 ).to_dict())

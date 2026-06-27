@@ -69,18 +69,32 @@ class SegmentationConfig(BaseModel):
 
 
 class FeaturesConfig(BaseModel):
-    # Minimum segmented volume for an implant/crown/bridge candidate. TotalSegmentator
-    # writes a label file per class even when empty, so without this every case gets a
-    # 0-volume "implant"/"crown" candidate. A real implant/crown is >100 mm3.
+    # Minimum segmented volume for an implant candidate. TotalSegmentator writes a
+    # label file per class even when empty, so without this every case gets a
+    # 0-volume "implant" candidate. A real implant is >100 mm3.
     candidate_min_volume_mm3: float = 20.0
+    # Crowns/bridges over-label on CTA (TS "crown" class can't be cleanly separated
+    # from dense natural enamel), so require a substantial restoration volume AND a
+    # supra-enamel median density: enamel/saturation tops out ~3000 HU on this
+    # cohort while metal/ceramic crowns read far higher (median ~4700-11600 HU).
+    crown_min_volume_mm3: float = 200.0
+    crown_min_median_hu: float = 3000.0
     periapical_search_radius_mm: float = 5.0
-    periapical_low_hu_threshold: float = -50.0
-    # Below this HU the voxel is treated as air (sinus, airway, oral cavity),
-    # not periapical pathology. Granuloma / cyst / abscess sit at ≈ 0–50 HU,
-    # mucus at ≈ 0–40 HU, pure air near −1000 HU. Anything < −300 HU inside
-    # the periapical search shell is almost certainly an air pocket.
-    periapical_air_hu_threshold: float = -300.0
-    periapical_min_volume_mm3: float = 10.0
+    # Periapical lucency = a focal soft-tissue/fluid density (granuloma/cyst/abscess,
+    # ≈ 0–60 HU) where alveolar bone (>~200 HU) should be. The candidate HU band is
+    # therefore (lesion_hu_min, lesion_hu_max): above fatty marrow (≈ −50 to −120 HU,
+    # normal) and below bone. (The previous band of (−300, −50) targeted fat and
+    # flagged normal marrow in ~100% of cases.)
+    periapical_lesion_hu_min: float = -20.0
+    periapical_lesion_hu_max: float = 80.0
+    periapical_min_volume_mm3: float = 50.0
+    # A true periapical lucency is INTRA-OSSEOUS: a focal low-density defect encased
+    # in alveolar bone. Without this, any soft-tissue-density blob near a tooth apex
+    # (gingiva, PDL space, vessels, partial-volume edges) is flagged, inflating
+    # prevalence to ~96%. Require a candidate's surrounding shell to be mostly
+    # jawbone, so only intra-bony lesions pass.
+    periapical_bone_shell_mm: float = 2.0
+    periapical_min_bone_encasement: float = 0.6
     # mm dilation applied to anatomical exclusion labels (sinuses, pharynx,
     # neurovascular canals). A small buffer absorbs segmentation edge error
     # so the air–bone interface itself doesn't register as a "lucency".

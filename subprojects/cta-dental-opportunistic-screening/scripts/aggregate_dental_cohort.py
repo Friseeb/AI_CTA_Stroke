@@ -7,6 +7,12 @@ are counted only above --min-candidate-mm3 (TotalSegmentator writes an empty lab
 file per class, which would otherwise inflate prevalence to ~100%), so this gives
 corrected numbers even on outputs produced before that fix.
 
+Note: as of the crown HU calibration, crowns/bridges are gated at the detector
+(features.py) by both volume (crown_min_volume_mm3) AND a supra-enamel median HU
+(crown_min_median_hu ~3000) to separate metal/ceramic restorations from dense
+natural enamel. On regenerated candidate_features.json the --min-candidate-mm3
+gate here is therefore only a backstop for older outputs.
+
 Example:
   python scripts/aggregate_dental_cohort.py --root outputs/dental_slaobids \
       --out outputs/dental_cohort_summary.csv
