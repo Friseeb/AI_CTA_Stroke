@@ -69,6 +69,10 @@ class SegmentationConfig(BaseModel):
 
 
 class FeaturesConfig(BaseModel):
+    # Minimum segmented volume for an implant/crown/bridge candidate. TotalSegmentator
+    # writes a label file per class even when empty, so without this every case gets a
+    # 0-volume "implant"/"crown" candidate. A real implant/crown is >100 mm3.
+    candidate_min_volume_mm3: float = 20.0
     periapical_search_radius_mm: float = 5.0
     periapical_low_hu_threshold: float = -50.0
     # Below this HU the voxel is treated as air (sinus, airway, oral cavity),

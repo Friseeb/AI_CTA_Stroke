@@ -140,8 +140,10 @@ def extract_features(
     hu_arr = sitk.GetArrayFromImage(hu_image).astype(np.float32)
 
     markers["teeth_present"] = _detect_teeth_present(label_files, voxel_volume_mm3=vox_vol)
-    markers["implants_candidate"] = _detect_implants(label_files, hu_arr, vox_vol)
-    markers["crowns_or_bridges_candidate"] = _detect_crowns_bridges(label_files, hu_arr, vox_vol)
+    markers["implants_candidate"] = _detect_implants(
+        label_files, hu_arr, vox_vol, min_volume_mm3=cfg.candidate_min_volume_mm3)
+    markers["crowns_or_bridges_candidate"] = _detect_crowns_bridges(
+        label_files, hu_arr, vox_vol, min_volume_mm3=cfg.candidate_min_volume_mm3)
     markers["periapical_lucency_candidate"] = _detect_periapical_lucency(
         label_files, hu_arr, spacing_ijk, vox_vol, cfg
     )
@@ -281,18 +283,21 @@ def _detect_teeth_present(
     return result
 
 
-def _detect_implants(label_files: dict[str, Path], hu_arr: np.ndarray, vox_vol: float) -> list[dict]:
+def _detect_implants(label_files: dict[str, Path], hu_arr: np.ndarray, vox_vol: float,
+                     min_volume_mm3: float = 20.0) -> list[dict]:
     result = []
     for label_name in ("implant", "implants"):
         if label_name in label_files:
             try:
                 mask = _label_array(label_files[label_name]).astype(bool)
                 volume = mask.sum() * vox_vol
-                mean_hu = float(hu_arr[mask].mean()) if mask.any() else None
+                if volume < min_volume_mm3:  # empty/negligible label — not a real implant
+                    continue
+                mean_hu = float(hu_arr[mask].mean())
                 result.append({
                     "label": label_name,
                     "volume_mm3": round(volume, 1),
-                    "mean_hu": round(mean_hu, 1) if mean_hu else None,
+                    "mean_hu": round(mean_hu, 1),
                     "confidence": "low",
                     "notes": "Implant candidate from segmentation label. Verify radiographically.",
                 })
@@ -301,13 +306,16 @@ def _detect_implants(label_files: dict[str, Path], hu_arr: np.ndarray, vox_vol: 
     return result
 
 
-def _detect_crowns_bridges(label_files: dict[str, Path], hu_arr: np.ndarray, vox_vol: float) -> list[dict]:
+def _detect_crowns_bridges(label_files: dict[str, Path], hu_arr: np.ndarray, vox_vol: float,
+                           min_volume_mm3: float = 20.0) -> list[dict]:
     result = []
     for label_name in ("crown", "bridge", "crowns", "bridges", "crown_or_bridge"):
         if label_name in label_files:
             try:
                 mask = _label_array(label_files[label_name]).astype(bool)
                 volume = mask.sum() * vox_vol
+                if volume < min_volume_mm3:  # empty/negligible label — skip
+                    continue
                 result.append({
                     "label": label_name,
                     "volume_mm3": round(volume, 1),
