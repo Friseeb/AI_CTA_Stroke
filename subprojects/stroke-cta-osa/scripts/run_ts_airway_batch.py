@@ -11,11 +11,11 @@ label (which is oropharynx-only and fails in ~half of cases).
 Designed to run on a CUDA box (e.g. the office DGX): ~seconds/case on GPU vs
 ~2.3 min/case on an Apple-MPS Mac.
 
-Example (DGX):
+Example (DGX, 4 parallel workers):
   python run_ts_airway_batch.py \
-      --manifest /path/slao_eligible.txt \
-      --out-dir  /path/ts_airway \
-      --device gpu --workers 1
+      --in-dir /path/slaobids \
+      --out-dir /path/ts_airway \
+      --device gpu --workers 4
 
 Then feed the masks into stroke_cta_osa:
   # per case:  stroke-cta-osa extract CASE.nii.gz --out OUT \
@@ -29,7 +29,9 @@ stroke pipeline consumes it directly.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import csv
+import re
 import subprocess
 import sys
 import tempfile
@@ -38,16 +40,64 @@ from pathlib import Path
 PHARYNX_LABELS = ("nasopharynx", "oropharynx", "hypopharynx")
 TASK = "head_glands_cavities"
 
+# BodyPartExamined values that confirm head/neck coverage
+_INCLUDE_BODY_PARTS = {"NECK", "HEAD", "HEADNECK", "HEAD_NECK", "BRAIN", "CRANIOFACIAL"}
+# BodyPartExamined values that definitively rule out pharyngeal coverage
+_EXCLUDE_BODY_PARTS = {"CHEST", "ABDOMEN", "CHEST_ABDOMEN", "CHEST_TO_PELVIS",
+                       "PELVIS", "THORAX", "HEART", "LUNG"}
+# Protocol substrings (lowercase) that indicate head/neck CTA when body part is blank
+_INCLUDE_PROTO_KW = {"stroke", "head", "neck", "carotid", "tia", "hyperacute", "cranial", "angio"}
+# Protocol substrings (lowercase) that rule out head/neck when body part is blank
+_EXCLUDE_PROTO_KW = {"chest", "pulmonar", "abdomen", "pelvis", "cap ", "cap-",
+                     "heart", "robotic", " pe ", "pe-", "dissection", "aorta",
+                     "renal", "portal", "liver", "colon"}
+
 
 def case_id_from_path(p: Path) -> str:
     name = p.name
     for suf in (".nii.gz", ".nii"):
         if name.endswith(suf):
             name = name[: -len(suf)]
-    # sub-1023_acq-CTA_ct -> sub-1023
-    import re
     m = re.match(r"(sub-[0-9A-Za-z]+)", name)
     return m.group(1) if m else name
+
+
+def is_head_neck_cta(p: Path) -> tuple[bool, str]:
+    """Check BIDS JSON sidecar for BodyPartExamined / ProtocolName.
+
+    Returns (include, reason). Falls back to True (don't drop) if no sidecar.
+    """
+    # Sidecar lives next to the NIfTI with the same stem
+    stem = p.name
+    for suf in (".nii.gz", ".nii"):
+        if stem.endswith(suf):
+            stem = stem[: -len(suf)]
+    sidecar = p.parent / f"{stem}.json"
+    if not sidecar.is_file():
+        return True, "no sidecar — assuming head/neck CTA"
+
+    try:
+        import json as _json
+        meta = _json.loads(sidecar.read_text())
+    except Exception as exc:
+        return True, f"sidecar unreadable ({exc}) — assuming head/neck CTA"
+
+    body_part = (meta.get("BodyPartExamined") or "").strip().upper().replace(" ", "_")
+    protocol  = (meta.get("ProtocolName") or "").strip().lower()
+
+    if body_part in _INCLUDE_BODY_PARTS:
+        return True, f"BodyPartExamined={body_part}"
+    if body_part in _EXCLUDE_BODY_PARTS:
+        return False, f"BodyPartExamined={body_part}"
+
+    # Body part is blank or unknown — fall back to protocol name keywords
+    if any(kw in protocol for kw in _INCLUDE_PROTO_KW):
+        return True, f"ProtocolName contains head/neck keyword ({protocol!r})"
+    if any(kw in protocol for kw in _EXCLUDE_PROTO_KW):
+        return False, f"ProtocolName suggests non-head/neck scan ({protocol!r})"
+
+    # Can't determine — be conservative and include (TS will return EMPTY if no pharynx)
+    return True, f"undetermined body_part={body_part!r} protocol={protocol!r} — including"
 
 
 def collect_inputs(manifest: Path | None, in_dir: Path | None, glob: str) -> list[Path]:
@@ -59,10 +109,11 @@ def collect_inputs(manifest: Path | None, in_dir: Path | None, glob: str) -> lis
     return []
 
 
-def run_ts(cta: Path, out_dir: Path, device: str, fast: bool) -> bool:
+def run_ts(cta: Path, out_dir: Path, device: str, fast: bool) -> bool | float:
     """Run TS head_glands_cavities into a temp dir, union pharyngeal labels."""
     import SimpleITK as sitk
     import numpy as np
+
     with tempfile.TemporaryDirectory() as td:
         cmd = ["TotalSegmentator", "-i", str(cta), "-o", td, "-ta", TASK,
                "--device", device]
@@ -93,6 +144,34 @@ def run_ts(cta: Path, out_dir: Path, device: str, fast: bool) -> bool:
         return float(union.sum() * vox_ml)
 
 
+def process_case(args: tuple) -> tuple[str, str, str, str]:
+    """Worker target: returns (case_id, cta_path, airway_path, status)."""
+    cta, out_dir_root, device, fast, skip_existing, idx, total = args
+    cid = case_id_from_path(cta)
+    cdir = out_dir_root / cid
+    airway = cdir / "airway.nii.gz"
+
+    prefix = f"[{idx}/{total}] {cid}"
+
+    if skip_existing and airway.is_file():
+        print(f"{prefix}  skip (exists)", flush=True)
+        return cid, str(cta), str(airway), "skipped"
+
+    # CTA verification via JSON sidecar
+    ok, reason = is_head_neck_cta(cta)
+    if not ok:
+        print(f"{prefix}  SKIP ({reason})", flush=True)
+        return cid, str(cta), "", f"skipped_not_head_neck:{reason}"
+
+    print(f"{prefix}  segmenting...", flush=True)
+    vol = run_ts(cta, cdir, device, fast)
+    if vol:
+        print(f"{prefix}  airway {vol:.1f} ml -> {airway}", flush=True)
+        return cid, str(cta), str(airway), f"ok:{vol:.1f}ml"
+    else:
+        return cid, str(cta), "", "failed"
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -105,39 +184,59 @@ def main() -> None:
     ap.add_argument("--device", default="gpu", help="gpu | cpu | mps (TS --device)")
     ap.add_argument("--fast", action="store_true", help="TS --fast (3mm, quicker/coarser)")
     ap.add_argument("--skip-existing", action="store_true", default=True)
+    ap.add_argument("--workers", type=int, default=1,
+                    help="Number of parallel TotalSegmentator workers (default 1). "
+                         "On a GPU with large unified memory (e.g. GB10) try 4.")
     args = ap.parse_args()
 
     inputs = collect_inputs(args.manifest, args.in_dir, args.glob)
     if not inputs:
         sys.exit("no inputs found")
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    manifest_rows = []
-    n_ok = n_skip = n_fail = 0
-    for i, cta in enumerate(inputs, 1):
-        cid = case_id_from_path(cta)
-        cdir = args.out_dir / cid
-        airway = cdir / "airway.nii.gz"
-        if args.skip_existing and airway.is_file():
-            print(f"[{i}/{len(inputs)}] {cid}  skip (exists)")
-            manifest_rows.append((cid, str(cta), str(airway), "skipped"))
-            n_skip += 1
-            continue
-        print(f"[{i}/{len(inputs)}] {cid}  segmenting...", flush=True)
-        vol = run_ts(cta, cdir, args.device, args.fast)
-        if vol:
-            print(f"    airway {vol:.1f} ml -> {airway}")
-            manifest_rows.append((cid, str(cta), str(airway), f"ok:{vol:.1f}ml"))
-            n_ok += 1
-        else:
-            manifest_rows.append((cid, str(cta), "", "failed"))
-            n_fail += 1
+
+    total = len(inputs)
+    print(f"Found {total} inputs. workers={args.workers} device={args.device}", flush=True)
+
+    job_args = [
+        (cta, args.out_dir, args.device, args.fast, args.skip_existing, i + 1, total)
+        for i, cta in enumerate(inputs)
+    ]
+
+    manifest_rows: list[tuple] = []
+    n_ok = n_skip = n_fail = n_not_cta = 0
+
+    if args.workers == 1:
+        for a in job_args:
+            cid, cta_path, airway_path, status = process_case(a)
+            manifest_rows.append((cid, cta_path, airway_path, status))
+            if status == "skipped":                   n_skip += 1
+            elif status.startswith("ok"):             n_ok += 1
+            elif status.startswith("skipped_not"):    n_not_cta += 1
+            else:                                     n_fail += 1
+    else:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as ex:
+            futures = {ex.submit(process_case, a): a for a in job_args}
+            for fut in concurrent.futures.as_completed(futures):
+                cid, cta_path, airway_path, status = fut.result()
+                manifest_rows.append((cid, cta_path, airway_path, status))
+                if status == "skipped":                   n_skip += 1
+                elif status.startswith("ok"):             n_ok += 1
+                elif status.startswith("skipped_not"):    n_not_cta += 1
+                else:                                     n_fail += 1
+
+    # sort manifest by case_id for reproducibility
+    manifest_rows.sort(key=lambda r: r[0])
 
     man = args.out_dir / "airway_manifest.csv"
     with man.open("w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["case_id", "cta_path", "airway_mask_path", "status"])
         w.writerows(manifest_rows)
-    print(f"\ndone: {n_ok} ok, {n_skip} skipped, {n_fail} failed. manifest -> {man}")
+    print(
+        f"\ndone: {n_ok} ok, {n_skip} skipped, {n_fail} failed, "
+        f"{n_not_cta} not-CTA. manifest -> {man}",
+        flush=True,
+    )
 
 
 if __name__ == "__main__":

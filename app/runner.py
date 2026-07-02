@@ -189,6 +189,57 @@ def run_sleep_apnea(
     yield from run_streaming(cmd)
 
 
+def run_osa(
+    nifti: Path,
+    out_dir: Path,
+    case_id: str,
+    feature_set: str | None = None,
+    save_masks: bool = False,
+    dental_artifacts_dir: Path | None = None,
+    external_airway_mask: Path | None = None,
+) -> Iterator[str]:
+    yield "--- OSA (stroke-cta-osa) pipeline ---"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    osa_bin = _CONDA_BIN / "stroke-cta-osa"
+    cmd = [
+        str(osa_bin) if osa_bin.exists() else "stroke-cta-osa",
+        "extract", str(nifti), "--out", str(out_dir),
+        "--patient-id", case_id, "--verbose",
+    ]
+    if feature_set:
+        cmd += ["--feature-set", feature_set]
+    if save_masks:
+        cmd.append("--save-masks")
+    if dental_artifacts_dir and dental_artifacts_dir.is_dir():
+        cmd += ["--dental-artifacts-dir", str(dental_artifacts_dir)]
+    if external_airway_mask and external_airway_mask.is_file():
+        cmd += ["--external-airway-mask", str(external_airway_mask)]
+    yield from run_streaming(cmd)
+
+
+def run_ts_airway_batch(
+    out_dir: Path,
+    device: str = "gpu",
+    fast: bool = False,
+    in_dir: Path | None = None,
+    manifest: Path | None = None,
+) -> Iterator[str]:
+    yield "--- TS Airway Batch (head_glands_cavities) ---"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    script = REPO_ROOT / "subprojects" / "stroke-cta-osa" / "scripts" / "run_ts_airway_batch.py"
+    cmd = [sys.executable, str(script), "--out-dir", str(out_dir), "--device", device]
+    if manifest and manifest.is_file():
+        cmd += ["--manifest", str(manifest)]
+    elif in_dir and in_dir.is_dir():
+        cmd += ["--in-dir", str(in_dir)]
+    else:
+        yield "[Airway] Provide --in-dir or --manifest."
+        return
+    if fast:
+        cmd.append("--fast")
+    yield from run_streaming(cmd)
+
+
 def run_batch_dental(
     nifti_paths: list[Path],
     out_root: Path,
