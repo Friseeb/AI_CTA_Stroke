@@ -1,4 +1,10 @@
 name: nv-segment-ct
+# DEPRECATED — superseded by environment.dgx_spark.yml for DGX Spark (GB10/aarch64).
+# Known issues with this file:
+#   - torch==2.6.0 resolves to a CPU-only wheel on aarch64 (no CUDA).
+#   - transformers unversioned pulls 5.x which breaks VISTA3D model loading.
+#   - monai==1.5.0 pins torch<2.7 and conflicts with cu130 torch builds.
+# Use environment.dgx_spark.yml instead.
 channels:
   - conda-forge
 dependencies:

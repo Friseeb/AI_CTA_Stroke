@@ -1,0 +1,47 @@
+name: laa-pipeline
+# macOS — Apple Silicon (M1/M2/M3/M4) and Intel
+#
+# GPU: uses MPS backend on Apple Silicon (set PYTORCH_ENABLE_MPS_FALLBACK=1).
+#      TotalSegmentator and CardiacCTExplorer support --device mps.
+#      VISTA3D (NV-Segment-CT) runs on CPU on macOS — no CUDA.
+#
+# Usage:
+#   bash scripts/setup_env.sh          # auto-detects this config
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - nibabel>=5.2
+  - SimpleITK
+  - pydicom
+  - numpy>=1.25
+  - scipy>=1.10
+  - networkx>=3.2
+  - pandas
+  - tqdm
+  - scikit-image
+  - scikit-learn
+  - matplotlib
+  - pyyaml
+  - pip:
+      # cpu wheel on macOS includes MPS kernels
+      - torch
+      - torchvision
+      - monai>=1.6.0
+      - transformers>=4.40,<5
+      - huggingface_hub
+      - einops
+      - safetensors
+      - tokenizers
+      - TotalSegmentator
+      - CardiacCTExplorer
+      - typer
+      - rich
+      - pydantic>=2.6
+      - vtk
+      - trimesh
+      - rtree
+      - pyradiomics
+      - streamlit>=1.35
+      - plotly

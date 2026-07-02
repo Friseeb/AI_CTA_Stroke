@@ -1,0 +1,6 @@
+{
+  "model_type": "segmentation",
+  "task": "image_segmentation",
+  "framework": "monai",
+  "modality": "ct"
+} 

@@ -1,0 +1,68 @@
+version: "3.9"
+
+# ============================================================
+# AI_CTA_Stroke – DGX Spark compose file
+#
+# Data layout assumed on the DGX Spark host:
+#   /mnt/LAA/          – named host path (LAA NIfTI data, BIDS-style)
+#     raw/             – input CTA NIfTIs
+#     derivatives/     – pipeline outputs (defaced, masks, priors …)
+#     weights/         – optional: pre-downloaded model weights
+#
+# Named weight cache volumes keep model files across container restarts
+# so the network is only hit once per DGX.
+#
+# Usage:
+#   cd docker/
+#   docker compose run --rm laa bash          # interactive shell
+#   docker compose run --rm laa \
+#       python /workspace/AI_CTA_Stroke/scripts/run_prior_fusion.py ...
+# ============================================================
+
+services:
+  laa:
+    build:
+      context: ..          # repo root
+      dockerfile: docker/Dockerfile
+    image: ai-cta-stroke-laa:latest
+
+    runtime: nvidia        # pass the GB10 GPU through to the container
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - PYTORCH_ENABLE_MPS_FALLBACK=0  # not needed on Linux/CUDA
+      # Override weight cache paths to the shared volume
+      - TOTALSEG_WEIGHTS_PATH=/workspace/weights/totalseg
+      - NV_SEGMENT_CT_CACHE=/workspace/weights/nv_segment_ct
+      - HF_HOME=/workspace/weights/huggingface
+
+    volumes:
+      # LAA data volume – bind-mount the host directory
+      - /mnt/LAA:/data/LAA
+
+      # Project code – live-mount for development; remove for production bake
+      - ..:/workspace/AI_CTA_Stroke
+
+      # Shared model-weight caches (survive container removal)
+      - weights_totalseg:/workspace/weights/totalseg
+      - weights_nv_segment_ct:/workspace/weights/nv_segment_ct
+      - weights_huggingface:/workspace/weights/huggingface
+
+    working_dir: /workspace/AI_CTA_Stroke
+
+    # Allocate a pseudo-TTY so interactive sessions work
+    stdin_open: true
+    tty: true
+
+    # Allow enough shared memory for PyTorch DataLoader workers
+    shm_size: "16g"
+
+    # Keep the container alive when run without a command
+    command: ["bash"]
+
+
+# ---- Named volumes for model weights -------------------------
+volumes:
+  weights_totalseg:
+  weights_nv_segment_ct:
+  weights_huggingface:

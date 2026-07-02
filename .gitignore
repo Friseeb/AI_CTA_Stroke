@@ -46,3 +46,9 @@ tmp_*
 
 # Vendored ADN clone + pretrained weights (MAR POC; not tracked)
 external/adn/
+
+# VISTA3D / NV-Segment-CT pretrained weights — download from HuggingFace instead:
+#   https://huggingface.co/nvidia/NV-Segment-CT
+external/nv_segment_ct/vista3d_pretrained_model/model.pt
+external/nv_segment_ct/vista3d_pretrained_model/model.safetensors
+external/nv_segment_ct/vista3d_pretrained_model/model_monai1.3.pt

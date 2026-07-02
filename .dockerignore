@@ -1,0 +1,44 @@
+# Version control
+.git
+.gitignore
+
+# Python caches
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+*.egg-info
+dist/
+build/
+
+# Virtual environments
+.venv*/
+**/.venv*/
+venv/
+env/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp / scratch
+tmp/
+*.log
+
+# Large data / weights (provided via volume at runtime)
+data/
+*.nii
+*.nii.gz
+*.dcm
+*.mhd
+*.raw
+weights/

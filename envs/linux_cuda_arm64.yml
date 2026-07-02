@@ -1,0 +1,49 @@
+name: laa-pipeline
+# Linux aarch64 + CUDA 13.0 — DGX Spark (GB10 Grace Blackwell, sm_100)
+#
+# Usage:
+#   bash scripts/setup_env.sh          # auto-detects this config
+#   conda env create -f envs/linux_cuda_arm64.yml  # then pip-install torch manually
+#
+# NOTE: conda cannot resolve aarch64 CUDA torch — torch must be pip-installed
+#       from the cu130 index after conda creates the base env.
+#       Use scripts/setup_env.sh which handles this automatically.
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - nibabel>=5.2
+  - SimpleITK
+  - pydicom
+  - numpy>=1.25
+  - scipy>=1.10
+  - networkx>=3.2
+  - pandas
+  - tqdm
+  - scikit-image
+  - scikit-learn
+  - matplotlib
+  - pyyaml
+  - pip:
+      # cu130 = only aarch64 CUDA 13.0 source (Blackwell sm_100 support)
+      - --index-url https://download.pytorch.org/whl/cu130
+      - torch
+      - torchvision
+      - monai>=1.6.0
+      - transformers>=4.40,<5
+      - huggingface_hub
+      - einops
+      - safetensors
+      - tokenizers
+      - TotalSegmentator
+      - CardiacCTExplorer
+      - typer
+      - rich
+      - pydantic>=2.6
+      - vtk
+      - trimesh
+      - rtree
+      - pyradiomics
+      - streamlit>=1.35
+      - plotly

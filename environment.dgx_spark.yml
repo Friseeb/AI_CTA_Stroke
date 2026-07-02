@@ -1,0 +1,62 @@
+name: laa-pipeline
+# ============================================================
+# DGX Spark (GB10 Grace Blackwell, aarch64, CUDA 13.0)
+# Single environment for the full LAA + dental pipeline.
+#
+# Create:
+#   conda env create -f environment.dgx_spark.yml
+#
+# Activate:
+#   conda activate laa-pipeline
+#
+# PyTorch notes:
+#   - aarch64 CUDA wheels only available at the cu130 index.
+#   - Standard pytorch/nvidia conda channels ship x86_64 CUDA only;
+#     conda must be used for the base env, pip for torch itself.
+#   - transformers must stay <5 for VISTA3D (NV-Segment-CT) compatibility.
+# ============================================================
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  # ---- image I/O (conda-forge builds are faster on aarch64) ----
+  - nibabel>=5.2
+  - SimpleITK
+  - pydicom
+  - numpy>=1.25
+  - scipy>=1.10
+  - networkx>=3.2
+  - pandas
+  - tqdm
+  - scikit-image
+  - scikit-learn
+  - matplotlib
+  - pyyaml
+  # ---- pip packages (torch must come from cu130 index) --------
+  - pip:
+      # PyTorch — CUDA 13.0, Blackwell (sm_100), aarch64
+      - --index-url https://download.pytorch.org/whl/cu130
+      - torch
+      - torchvision
+      # MONAI — must be >=1.6.0; 1.5.0 pins torch<2.7 and breaks
+      - monai>=1.6.0
+      # transformers — must stay <5; 5.x renames attributes VISTA3D relies on
+      - transformers>=4.40,<5
+      - huggingface_hub
+      - einops
+      - safetensors
+      - tokenizers
+      # Segmentation models
+      - TotalSegmentator
+      - CardiacCTExplorer
+      # Dental pipeline
+      - typer
+      - rich
+      - pydantic>=2.6
+      # Shape / mesh analysis
+      - vtk
+      - trimesh
+      - rtree
+      # Radiomics
+      - pyradiomics

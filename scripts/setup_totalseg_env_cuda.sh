@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# DEPRECATED for DGX Spark (aarch64, GB10). Use setup_dgx_spark_env.sh instead.
+# This script targets cu121/torch 2.2.2 which predates Blackwell (sm_100) support.
+# Kept only for reference on older x86_64 CUDA systems.
 set -euo pipefail
 
 # Create a CUDA env for TotalSegmentator / MONAI on NVIDIA (e.g., 3090 x2).
