@@ -78,12 +78,15 @@ def compute_fat_features(
     # (hundreds of MB at clinical CTA sizes). We free every intermediate at its
     # last use so they don't all stay resident through the parapharyngeal block,
     # which is what set the per-case memory high-water mark.
-    cervical_body = body.copy()
-    cervical_body[:z_lo] = False
-    cervical_body[z_hi + 1:] = False
-    cervical_fat = fat_voxels & cervical_body
-    cervical_sub_fat = fat_voxels & sub & cervical_body
-    cervical_deep_fat = fat_voxels & deep & cervical_body
+    #
+    # Clip body to cervical z range in-place — sub and deep are already derived
+    # from body above, so the original full-body silhouette is no longer needed.
+    # This saves one full-volume bool copy (~0.5× raw bytes).
+    body[:z_lo] = False
+    body[z_hi + 1:] = False
+    cervical_fat = fat_voxels & body
+    cervical_sub_fat = fat_voxels & sub & body
+    cervical_deep_fat = fat_voxels & deep & body
     del sub, deep  # only needed to build the two masks above
     anatomy_exclusion, anatomy_used = combined_anatomy_exclusion_mask(
         anatomy_masks,
@@ -98,7 +101,7 @@ def compute_fat_features(
     )
 
     if save_masks_callback is not None:
-        save_masks_callback("body", cervical_body)
+        save_masks_callback("body", body)
         save_masks_callback("fat_cervical_total", cervical_fat)
         save_masks_callback("fat_cervical_subcutaneous", cervical_sub_fat)
         save_masks_callback("fat_cervical_deep", cervical_deep_fat)
@@ -119,9 +122,9 @@ def compute_fat_features(
 
     # ---- B. Subcutaneous cervical fat ----
     out.update(_block("fat_subcutaneous_cervical", arr_hu, cervical_sub_fat, image))
-    neck_area_voxels = int(cervical_body.sum())
+    neck_area_voxels = int(body.sum())
     sub_voxels = int(cervical_sub_fat.sum())
-    del cervical_sub_fat, cervical_body
+    del cervical_sub_fat  # body still needed at line ~320 (tongue_soft = tongue_band & body)
     out["fat_subcutaneous_fraction_of_neck_area"] = (
         round(sub_voxels / neck_area_voxels, 4) if neck_area_voxels else _NAN
     )
@@ -333,6 +336,8 @@ def compute_fat_features(
         out["tongue_posterior_low_hu_fraction"] = _NAN
         out["tongue_fat_surrogate_available"] = False
         out["tongue_roi_method"] = "unavailable_no_airway"
+
+    del body  # free cervical body mask — no longer needed after tongue block
 
     return out
 

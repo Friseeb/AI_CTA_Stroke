@@ -36,6 +36,19 @@ class ROI:
 
 # --- Body / soft-tissue envelope -------------------------------------------
 
+def _body_seed(soft: np.ndarray, z_mid: int, y_mid: int, x_mid: int) -> tuple[int, int, int] | None:
+    """Find a soft-tissue voxel near the image centre for flood-fill seed."""
+    for dz in (0, 5, -5, 10, -10, 20, -20):
+        for dr in (0, 10, 20, 30, 40):
+            for dy, dx in ((0, 0), (dr, 0), (-dr, 0), (0, dr), (0, -dr)):
+                sz = int(np.clip(z_mid + dz, 0, soft.shape[0] - 1))
+                sy = int(np.clip(y_mid + dy, 0, soft.shape[1] - 1))
+                sx = int(np.clip(x_mid + dx, 0, soft.shape[2] - 1))
+                if soft[sz, sy, sx]:
+                    return (sz, sy, sx)
+    return None
+
+
 def body_mask(image: CTAImage, body_air_hu: float) -> np.ndarray:
     """Connected-component body silhouette.
 
@@ -43,25 +56,41 @@ def body_mask(image: CTAImage, body_air_hu: float) -> np.ndarray:
     so the table/headrest below the patient is dropped. Holes inside the
     silhouette are filled per axial slice to recover internal air-filled
     structures (airway, sinuses, oesophagus) as part of 'body'.
+
+    Memory: prefers flood-fill (binary_propagation) from a centre seed rather
+    than ndimage.label, which outputs int64 — for a 512×512×2575 CTA that
+    label array alone is ~5.4 GB vs. ~1.35 GB for three bool arrays.  For
+    standard head/neck CTA the body always occupies the image centre.  A
+    label-based fallback handles edge cases (off-centre or unusual volumes).
     """
-    # Memory-conscious: this runs on the full-resolution volume (hundreds of
-    # millions of voxels), so we free each large temporary as soon as it is no
-    # longer needed and fill holes in place rather than allocating a second
-    # full-volume buffer.
     soft = image.array > body_air_hu
     if not soft.any():
         return np.zeros(image.shape_zyx, dtype=bool)
+
+    z_mid, y_mid, x_mid = soft.shape[0] // 2, soft.shape[1] // 2, soft.shape[2] // 2
+    pt = _body_seed(soft, z_mid, y_mid, x_mid)
+    if pt is not None:
+        seed = np.zeros(soft.shape, dtype=bool)
+        seed[pt] = True
+        body = ndimage.binary_propagation(seed, mask=soft)
+        del seed, soft
+        if body.sum() > body.size * 0.01:   # sanity: should be >> 1% of volume
+            for z in range(body.shape[0]):
+                body[z] = ndimage.binary_fill_holes(body[z])
+            return body
+        # Seed gave implausibly small result — fall through to label
+        del body
+        soft = image.array > body_air_hu
+
+    # Fallback: full label (int64, memory-heavy; rarely reached for head/neck CTA)
     labeled, n = ndimage.label(soft)
     del soft
     if n == 0:
         del labeled
         return np.zeros(image.shape_zyx, dtype=bool)
-    # Largest component via bincount (avoids a full-volume np.ones_like weight
-    # array and the per-label sum_labels pass).
     counts = np.bincount(labeled.ravel())
-    counts[0] = 0  # background
-    largest = int(counts.argmax())
-    body = labeled == largest
+    counts[0] = 0
+    body = labeled == int(counts.argmax())
     del labeled
     for z in range(body.shape[0]):
         body[z] = ndimage.binary_fill_holes(body[z])

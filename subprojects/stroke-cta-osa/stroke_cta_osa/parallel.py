@@ -33,10 +33,12 @@ from .config import PipelineConfig
 
 # --- calibration constants --------------------------------------------------
 
-# Peak RSS ≈ PEAK_MULTIPLIER × raw voxel bytes. Observed ≈9× post-optimisation
-# (same for in-process and supplied-mask paths — both are fat-bound); 11× adds
-# headroom for heavier-than-average cases.
-PEAK_MULTIPLIER = 11.0
+# Peak RSS ≈ PEAK_MULTIPLIER × raw voxel bytes.
+# body_mask now uses binary_propagation (3 bool arrays = 1.5× raw) instead of
+# ndimage.label (int64 = 4× raw), so the hot path is now the fat block
+# (image + fat_voxels + body + sub + deep + cervical variants ≈ 4.5× raw).
+# Observed peak post-optimisation: ~5×. 7× adds headroom for heavy cases.
+PEAK_MULTIPLIER = 7.0
 # Never assume a case needs less than this (header probe failures, small FOV).
 PEAK_FLOOR_GB = 2.5
 # Fraction of *available* RAM we are willing to commit to workers.
