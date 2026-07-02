@@ -53,14 +53,45 @@ def test_parapharyngeal_with_airway(synth_cta):
     assert feats["fat_parapharyngeal_to_airway_ratio"] > 0
 
 
+def test_parapharyngeal_can_use_anatomy_priors(synth_cta):
+    tongue = np.zeros_like(synth_cta.array, dtype=bool)
+    tongue[35:45, 25:35, 36:44] = True
+    feats = compute_fat_features(
+        synth_cta, _airway_info(synth_cta), SharedAirwayLandmarks(),
+        HUConfig(), FatConfig(parapharyngeal_axial_window_mm=30.0),
+        airway_min_csa_z_index=40,
+        anatomy_masks={"tongue": tongue},
+    )
+    assert feats["fat_parapharyngeal_total_volume_ml"] > 0
+    assert feats["fat_anatomy_prior_masks_used"] == "tongue"
+    assert "anatomy_prior_sector" in feats["fat_parapharyngeal_roi_method"]
+
+
 def test_retropharyngeal_present(synth_cta):
     feats = compute_fat_features(
         synth_cta, _airway_info(synth_cta), SharedAirwayLandmarks(),
         HUConfig(), FatConfig(),
         airway_min_csa_z_index=40,
     )
+    assert feats["fat_deep_peripharyngeal_volume_ml"] > 0
     assert feats["fat_retropharyngeal_volume_ml"] > 0
+    assert (feats["fat_retropharyngeal_volume_ml"]
+            <= feats["fat_deep_peripharyngeal_volume_ml"])
     assert feats["fat_retropharyngeal_mean_thickness_mm"] > 0
+    assert "deep_peripharyngeal" in feats["fat_retropharyngeal_roi_method"]
+
+
+def test_retropharyngeal_can_use_prevertebral_prior(synth_cta):
+    prevertebral = np.zeros_like(synth_cta.array, dtype=bool)
+    prevertebral[30:60, 58:64, 30:50] = True
+    feats = compute_fat_features(
+        synth_cta, _airway_info(synth_cta), SharedAirwayLandmarks(),
+        HUConfig(), FatConfig(),
+        airway_min_csa_z_index=40,
+        anatomy_masks={"prevertebral": prevertebral},
+    )
+    assert feats["fat_retropharyngeal_volume_ml"] > 0
+    assert "prevertebral_bounded" in feats["fat_retropharyngeal_roi_method"]
 
 
 def test_fat_features_without_airway_emits_nans(synth_cta):

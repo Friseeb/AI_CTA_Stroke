@@ -27,12 +27,7 @@ class CaseResult:
     centerline_points: pd.DataFrame
     centerline_point_features: pd.DataFrame
     segment_level_features: pd.DataFrame
-    wall_morphology_features: pd.DataFrame
-    wall_morphology_sector_features: pd.DataFrame
-    wall_morphology_parcel_features: pd.DataFrame
     wall_from_fat_features: pd.DataFrame
-    encoder_features: pd.DataFrame
-    encoder_patch_manifest: pd.DataFrame
     wide_features: pd.DataFrame
 
 
@@ -57,7 +52,6 @@ def run_pipeline_case(
     )
     from .centerline import approximate_centerline_by_slices
     from .config import load_config
-    from .encoders import extract_encoder_features_from_masks
     from .fat_omics import extract_periaortic_fat_omics
     from .fat_wall import extract_fat_closed_aortic_wall
     from .features import ensure_feature_columns, long_to_wide_features, write_csv
@@ -67,7 +61,6 @@ def run_pipeline_case(
     from .preprocess import clean_aorta_mask
     from .segmentation_qc import calculate_qc_metrics, qc_metrics_to_frame
     from .shells import create_aorta_wall_band_masks, create_base_shells, local_shell_around_mask
-    from .wall_morphology import extract_wall_morphology
 
     config = load_config(config_path)
     outdir = Path(outdir)
@@ -276,139 +269,6 @@ def run_pipeline_case(
             image.image,
             masks_dir / f"{case_id}_shell_calcification_local.nii.gz",
         )
-
-    wall_config = config.get("wall_morphology", {})
-    if bool(wall_config.get("enabled", False)):
-        wall_result = extract_wall_morphology(
-            cleaned_mask,
-            spacing_xyz=spacing_xyz,
-            case_id=case_id,
-            min_slice_voxels=int(wall_config.get("min_slice_voxels", 80)),
-            axial_step_mm=float(wall_config.get("axial_step_mm", 2.0)),
-            angular_bins=int(wall_config.get("angular_bins", 24)),
-            smoothing_bins=int(wall_config.get("smoothing_bins", 5)),
-            candidate_depth_mm=float(wall_config.get("candidate_depth_mm", 4.0)),
-            candidate_neighborhood_mm=float(wall_config.get("candidate_neighborhood_mm", 2.0)),
-            candidate_focal_radius_mm=float(wall_config.get("candidate_focal_radius_mm", 1.0)),
-            wall_parcel_radius_mm=float(wall_config.get("wall_parcel_radius_mm", 1.25)),
-            max_components_per_slice=int(wall_config.get("max_components_per_slice", 4)),
-            software_version=software_version,
-        )
-        if bool(config["outputs"]["save_masks"]):
-            write_mask_like(
-                wall_result.candidate_boundary_mask,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_candidate_boundary.nii.gz",
-            )
-            write_mask_like(
-                wall_result.candidate_neighborhood_mask,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_candidate_2mm.nii.gz",
-            )
-            write_mask_like(
-                wall_result.inward_candidate_boundary_mask,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_inward_candidate_boundary.nii.gz",
-            )
-            write_mask_like(
-                wall_result.inward_candidate_neighborhood_mask,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_inward_candidate_2mm.nii.gz",
-            )
-            write_mask_like(
-                wall_result.outward_candidate_boundary_mask,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_outward_candidate_boundary.nii.gz",
-            )
-            write_mask_like(
-                wall_result.outward_candidate_neighborhood_mask,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_outward_candidate_2mm.nii.gz",
-            )
-            write_mask_like(
-                wall_result.direction_labelmap,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_direction_labels_2mm.nii.gz",
-            )
-            write_mask_like(
-                wall_result.boundary_direction_labelmap,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_direction_labels_wall.nii.gz",
-            )
-            write_mask_like(
-                wall_result.inward_focal_mask,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_inward_focal_1mm.nii.gz",
-            )
-            write_mask_like(
-                wall_result.outward_focal_mask,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_outward_focal_1mm.nii.gz",
-            )
-            write_mask_like(
-                wall_result.focal_direction_labelmap,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_direction_labels_focal_1mm.nii.gz",
-            )
-            write_label_like(
-                wall_result.parcel_labelmap,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_parcels_wall.nii.gz",
-            )
-            write_label_like(
-                wall_result.inward_parcel_labelmap,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_inward_parcels_wall.nii.gz",
-            )
-            write_label_like(
-                wall_result.outward_parcel_labelmap,
-                image.image,
-                masks_dir / f"{case_id}_wall_morphology_outward_parcels_wall.nii.gz",
-            )
-        shell_masks["wall_morphology_candidate_boundary"] = wall_result.candidate_boundary_mask
-        shell_masks["wall_morphology_candidate_2mm"] = wall_result.candidate_neighborhood_mask
-        shell_masks["wall_morphology_inward_candidate_boundary"] = wall_result.inward_candidate_boundary_mask
-        shell_masks["wall_morphology_inward_candidate_2mm"] = wall_result.inward_candidate_neighborhood_mask
-        shell_masks["wall_morphology_outward_candidate_boundary"] = wall_result.outward_candidate_boundary_mask
-        shell_masks["wall_morphology_outward_candidate_2mm"] = wall_result.outward_candidate_neighborhood_mask
-        shell_masks["wall_morphology_inward_focal_1mm"] = wall_result.inward_focal_mask
-        shell_masks["wall_morphology_outward_focal_1mm"] = wall_result.outward_focal_mask
-        shell_masks["wall_morphology_parcels_wall"] = wall_result.parcel_labelmap > 0
-        shell_masks["wall_morphology_inward_parcels_wall"] = wall_result.inward_parcel_labelmap > 0
-        shell_masks["wall_morphology_outward_parcels_wall"] = wall_result.outward_parcel_labelmap > 0
-    else:
-        wall_result = None
-
-    encoder_source_masks = _encoder_source_masks(
-        cleaned_mask=cleaned_mask,
-        calcium_masks=calcium_masks,
-        wall_morphology_masks=(
-            {
-                "wall_morphology_candidates": wall_result.candidate_boundary_mask,
-                "wall_morphology_candidate_2mm": wall_result.candidate_neighborhood_mask,
-                "wall_morphology_inward_candidates": wall_result.inward_candidate_boundary_mask,
-                "wall_morphology_inward_candidate_2mm": wall_result.inward_candidate_neighborhood_mask,
-                "wall_morphology_outward_candidates": wall_result.outward_candidate_boundary_mask,
-                "wall_morphology_outward_candidate_2mm": wall_result.outward_candidate_neighborhood_mask,
-                "wall_morphology_inward_focal_1mm": wall_result.inward_focal_mask,
-                "wall_morphology_outward_focal_1mm": wall_result.outward_focal_mask,
-                "wall_morphology_parcels_wall": wall_result.parcel_labelmap > 0,
-                "wall_morphology_inward_parcels_wall": wall_result.inward_parcel_labelmap > 0,
-                "wall_morphology_outward_parcels_wall": wall_result.outward_parcel_labelmap > 0,
-            }
-            if wall_result is not None
-            else {}
-        ),
-        patch_sources=list(config.get("encoders", {}).get("patch_sources", [])),
-    )
-    encoder_features, encoder_patch_manifest = extract_encoder_features_from_masks(
-        image=image.array,
-        source_masks=encoder_source_masks,
-        spacing_xyz=spacing_xyz,
-        case_id=case_id,
-        config=config,
-        software_version=software_version,
-    )
 
     segment_labels = whole_aorta_segment_mask(cleaned_mask)
     segment_path = masks_dir / f"{case_id}_aorta_segments_v1.nii.gz"
@@ -847,6 +707,11 @@ def run_pipeline_case(
             use_input_aorta_as_lumen_floor=bool(
                 wall_from_fat_config.get("use_input_aorta_as_lumen_floor", False)
             ),
+            lumen_floor_mask=(
+                raw_mask.array
+                if bool(wall_from_fat_config.get("preserve_raw_input_aorta_in_lumen_floor", False))
+                else None
+            ),
             smooth_lumen_profile_mm=float(wall_from_fat_config.get("smooth_lumen_profile_mm", 10.0)),
             min_core_voxels_per_slice=int(wall_from_fat_config.get("min_core_voxels_per_slice", 20)),
             wall_hu_min=float(wall_from_fat_config.get("wall_hu_min", -30.0)),
@@ -1100,9 +965,6 @@ def run_pipeline_case(
         _save_figures(image.array, cleaned_mask, calcium_seed, case_id, figures_dir)
 
     case_level_features = _qc_to_feature_rows(qc_metrics, software_version)
-    wall_morphology_features = wall_result.summary_features if wall_result is not None else pd.DataFrame()
-    wall_morphology_sector_features = wall_result.sector_features if wall_result is not None else pd.DataFrame()
-    wall_morphology_parcel_features = wall_result.parcel_features if wall_result is not None else pd.DataFrame()
     all_long_features = pd.concat(
         [
             ensure_feature_columns(case_level_features),
@@ -1110,10 +972,8 @@ def run_pipeline_case(
             ensure_feature_columns(calcium_omics_frame),
             ensure_feature_columns(fat_omics_frame),
             ensure_feature_columns(lumen_protrusion_summary),
-            ensure_feature_columns(wall_morphology_features),
             ensure_feature_columns(wall_from_fat_frame),
             ensure_feature_columns(radiomics_frame),
-            ensure_feature_columns(encoder_features),
         ],
         ignore_index=True,
     )
@@ -1126,13 +986,8 @@ def run_pipeline_case(
     write_csv(lumen_protrusion_summary, features_dir / "lumen_protrusion_summary_features.csv")
     write_csv(lumen_protrusion_candidates, features_dir / "lumen_protrusion_candidates.csv")
     write_csv(lumen_protrusion_point_features, features_dir / "lumen_protrusion_point_features.csv")
-    write_csv(wall_morphology_features, features_dir / "wall_morphology_features.csv")
-    write_csv(wall_morphology_sector_features, features_dir / "wall_morphology_sector_features.csv")
-    write_csv(wall_morphology_parcel_features, features_dir / "wall_morphology_parcel_features.csv")
     write_csv(wall_from_fat_frame, features_dir / "wall_from_fat_features.csv")
     write_csv(radiomics_frame, features_dir / "radiomics_features.csv")
-    write_csv(encoder_features, features_dir / "encoder_features.csv")
-    write_csv(encoder_patch_manifest, features_dir / "encoder_patch_manifest.csv")
     write_csv(case_level_features, features_dir / "case_level_features.csv")
     write_csv(centerline_frame, features_dir / "centerline_points.csv")
     write_csv(geometry_frame, features_dir / "centerline_point_features.csv")
@@ -1152,12 +1007,7 @@ def run_pipeline_case(
         centerline_points=centerline_frame,
         centerline_point_features=geometry_frame,
         segment_level_features=segment_frame,
-        wall_morphology_features=wall_morphology_features,
-        wall_morphology_sector_features=wall_morphology_sector_features,
-        wall_morphology_parcel_features=wall_morphology_parcel_features,
         wall_from_fat_features=wall_from_fat_frame,
-        encoder_features=encoder_features,
-        encoder_patch_manifest=encoder_patch_manifest,
         wide_features=wide_features,
     )
 
@@ -1180,9 +1030,15 @@ def run_batch(
     manifest: Path,
     outdir: Path = Path("outputs"),
     config: Path | None = None,
+    metadata_filter: str = "none",
+    metadata_include_keywords: list[str] | None = None,
+    metadata_exclude_keywords: list[str] | None = None,
+    allow_missing_metadata: bool = False,
 ) -> None:
     """Run all cases from a manifest CSV."""
     import pandas as pd
+
+    from .metadata_filter import evaluate_neuro_cta_metadata
 
     _configure_logging()
     manifest_frame = pd.read_csv(manifest)
@@ -1191,22 +1047,43 @@ def run_batch(
     if missing:
         raise ValueError(f"Manifest is missing columns: {', '.join(sorted(missing))}")
 
+    outdir = Path(outdir)
+    metadata_rows: list[dict[str, object]] = []
     results: list[CaseResult] = []
-    for row in manifest_frame.itertuples(index=False):
-        case_id = str(getattr(row, "case_id"))
+    for row in manifest_frame.to_dict(orient="records"):
+        if metadata_filter == "neuro-cta":
+            eligibility = evaluate_neuro_cta_metadata(
+                row,
+                manifest_base=manifest.parent,
+                include_keywords=metadata_include_keywords or [],
+                exclude_keywords=metadata_exclude_keywords or [],
+                allow_missing_metadata=allow_missing_metadata,
+            )
+            metadata_rows.append(eligibility.as_dict())
+            if not eligibility.eligible:
+                continue
+        elif metadata_filter != "none":
+            raise ValueError(f"Unsupported metadata filter: {metadata_filter}")
+
+        case_id = str(row["case_id"])
         logger.info("Running case %s", case_id)
         results.append(
             run_pipeline_case(
-                image_path=getattr(row, "image_path"),
-                aorta_mask_path=getattr(row, "aorta_mask_path"),
+                image_path=row["image_path"],
+                aorta_mask_path=row["aorta_mask_path"],
                 case_id=case_id,
                 outdir=outdir,
                 config_path=config,
             )
         )
+    if metadata_rows:
+        outdir.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(metadata_rows).to_csv(outdir / "metadata_eligibility.csv", index=False)
+    if not results:
+        raise ValueError("No cases were processed after manifest and metadata filtering.")
 
-    features_dir = Path(outdir) / "features"
-    qc_dir = Path(outdir) / "qc"
+    features_dir = outdir / "features"
+    qc_dir = outdir / "qc"
     _write_aggregated(results, qc_dir, features_dir)
     print(f"Wrote batch outputs for {len(results)} cases to {outdir}")
 
@@ -1232,11 +1109,13 @@ def _extract_configured_radiomics(
     if not bool(config["radiomics"]["enabled"]):
         return pd.DataFrame()
 
+    radiomics_backend = str(config["radiomics"].get("backend", "pyradiomics"))
+    radiomics_device = str(config["radiomics"].get("device", "cpu"))
     settings_path = resolve_project_path(str(config["radiomics"]["settings_path"]), project_root)
     if settings_path.exists():
-        shutil.copy2(settings_path, masks_dir / f"{case_id}_pyradiomics_settings.yaml")
+        shutil.copy2(settings_path, masks_dir / f"{case_id}_{radiomics_backend}_settings.yaml")
     else:
-        logger.warning("PyRadiomics settings file not found: %s. Using PyRadiomics defaults.", settings_path)
+        logger.warning("Radiomics settings file not found: %s. Using backend defaults.", settings_path)
         settings_path = None
 
     region_paths: dict[str, Path] = {"aorta_mask": cleaned_mask_path}
@@ -1264,6 +1143,8 @@ def _extract_configured_radiomics(
                     settings_path=settings_path,
                     include_diagnostics=bool(config["radiomics"]["include_diagnostics"]),
                     software_version=software_version,
+                    backend=radiomics_backend,
+                    device=radiomics_device,
                 )
             )
         except Exception as exc:
@@ -1329,35 +1210,6 @@ def _calcification_mask_filename(case_id: str, roi_name: str, threshold: int | f
         return f"{case_id}_calcification_thr{threshold_text}HU.nii.gz"
     safe_roi = "".join(char if char.isalnum() or char in {"_", "-"} else "_" for char in roi_name)
     return f"{case_id}_calcification_{safe_roi}_thr{threshold_text}HU.nii.gz"
-
-
-def _encoder_source_masks(
-    cleaned_mask: object,
-    calcium_masks: dict[int, object],
-    wall_morphology_masks: dict[str, object],
-    patch_sources: list[str],
-) -> dict[str, object]:
-    import numpy as np
-
-    sources: dict[str, object] = {}
-    for source in patch_sources:
-        if source == "wall_surface_grid":
-            sources[source] = cleaned_mask
-        elif source.startswith("calcification_") and source.endswith("HU"):
-            threshold_text = source.removeprefix("calcification_").removesuffix("HU")
-            try:
-                threshold = int(threshold_text)
-            except ValueError:
-                continue
-            if threshold in calcium_masks:
-                sources[source] = calcium_masks[threshold]
-        elif source == "calcification_highest_nonempty":
-            sources[source] = _highest_nonempty_mask(calcium_masks)
-        elif source in wall_morphology_masks:
-            sources[source] = wall_morphology_masks[source]
-    if not sources:
-        sources["wall_surface_grid"] = cleaned_mask
-    return sources
 
 
 def _highest_nonempty_mask(masks: dict[int, object]) -> object:
@@ -1526,16 +1378,7 @@ def _write_aggregated(results: list[CaseResult], qc_dir: Path, features_dir: Pat
         features_dir / "lumen_protrusion_point_features.csv": [
             result.lumen_protrusion_point_features for result in results
         ],
-        features_dir / "wall_morphology_features.csv": [result.wall_morphology_features for result in results],
-        features_dir / "wall_morphology_sector_features.csv": [
-            result.wall_morphology_sector_features for result in results
-        ],
-        features_dir / "wall_morphology_parcel_features.csv": [
-            result.wall_morphology_parcel_features for result in results
-        ],
         features_dir / "radiomics_features.csv": [result.radiomics for result in results],
-        features_dir / "encoder_features.csv": [result.encoder_features for result in results],
-        features_dir / "encoder_patch_manifest.csv": [result.encoder_patch_manifest for result in results],
         features_dir / "case_level_features.csv": [result.case_level_features for result in results],
         features_dir / "centerline_points.csv": [result.centerline_points for result in results],
         features_dir / "centerline_point_features.csv": [result.centerline_point_features for result in results],
@@ -1551,9 +1394,7 @@ def _write_aggregated(results: list[CaseResult], qc_dir: Path, features_dir: Pat
             *[result.calcium_omics for result in results],
             *[result.fat_omics for result in results],
             *[result.lumen_protrusion_summary for result in results],
-            *[result.wall_morphology_features for result in results],
             *[result.radiomics for result in results],
-            *[result.encoder_features for result in results],
         ],
         ignore_index=True,
     )
@@ -1579,6 +1420,29 @@ def build_parser() -> argparse.ArgumentParser:
     batch.add_argument("--manifest", required=True, type=Path, help="CSV with case_id,image_path,aorta_mask_path.")
     batch.add_argument("--outdir", default=Path("outputs"), type=Path, help="Output directory.")
     batch.add_argument("--config", default=None, type=Path, help="YAML config path.")
+    batch.add_argument(
+        "--metadata-filter",
+        choices=["none", "neuro-cta"],
+        default="none",
+        help="Optional manifest/JSON metadata eligibility filter before processing.",
+    )
+    batch.add_argument(
+        "--metadata-include-keyword",
+        action="append",
+        default=[],
+        help="Extra neuro/stroke inclusion keyword for --metadata-filter neuro-cta. Repeatable.",
+    )
+    batch.add_argument(
+        "--metadata-exclude-keyword",
+        action="append",
+        default=[],
+        help="Extra non-target exclusion keyword for --metadata-filter neuro-cta. Repeatable.",
+    )
+    batch.add_argument(
+        "--allow-missing-metadata",
+        action="store_true",
+        help="With --metadata-filter neuro-cta, process rows lacking metadata instead of skipping them.",
+    )
     return parser
 
 
@@ -1588,7 +1452,15 @@ def main(argv: list[str] | None = None) -> None:
     if args.command == "run-single":
         run_single(args.image, args.aorta_mask, args.case_id, args.outdir, args.config)
     elif args.command == "run-batch":
-        run_batch(args.manifest, args.outdir, args.config)
+        run_batch(
+            args.manifest,
+            args.outdir,
+            args.config,
+            metadata_filter=args.metadata_filter,
+            metadata_include_keywords=args.metadata_include_keyword,
+            metadata_exclude_keywords=args.metadata_exclude_keyword,
+            allow_missing_metadata=args.allow_missing_metadata,
+        )
     else:
         parser.error(f"Unknown command: {args.command}")
 

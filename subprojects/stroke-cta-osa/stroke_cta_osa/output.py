@@ -9,6 +9,8 @@ from typing import Iterable, Optional
 import pandas as pd
 
 from . import PIPELINE_NAME, __version__
+from . import evidence_registry as er
+from . import feature_sets as fs
 from .logging_utils import get_logger
 from .metric_registry import all_metrics, empty_row, feature_names
 from .types import CaseResult
@@ -78,13 +80,101 @@ def write_outputs(
     if feature_metadata_path is None:
         feature_metadata_path = out_dir / "feature_metadata.json"
     feature_metadata_path.write_text(json.dumps(
-        {"pipeline": PIPELINE_NAME, "pipeline_version": __version__,
-         "columns": list(df.columns), "n_rows": len(df)},
-        indent=2,
+        {
+            "pipeline": PIPELINE_NAME, "pipeline_version": __version__,
+            "columns": list(df.columns), "n_rows": len(df),
+            "feature_sets": {
+                name: {
+                    "description": fs.describe(name),
+                    "evidence_tiers": [t.value for t in fs.tiers_for(name)],
+                    "evidence_features": fs.evidence_features(name),
+                }
+                for name in fs.ALLOWED_FEATURE_SETS
+            },
+            "evidence_registry": er.to_records(),
+        },
+        indent=2, default=str,
     ))
     paths["feature_metadata"] = feature_metadata_path
 
+    # Evidence-aware companion outputs (tiered subset CSVs + summaries).
+    paths.update(write_evidence_outputs(df, out_dir))
+
     return paths
+
+
+# ---------------------------------------------------------------------------
+# Evidence-aware outputs
+# ---------------------------------------------------------------------------
+
+_FEATURE_SET_FILENAMES = {
+    "core_osa_backed": "features_core_osa_backed.csv",
+    "core_plus_anatomic_extensions": "features_core_plus_anatomic_extensions.csv",
+    "core_plus_cardiometabolic_ct": "features_core_plus_cardiometabolic_ct.csv",
+    "all_features_exploratory": "features_all_exploratory.csv",
+}
+
+
+def write_evidence_outputs(df: pd.DataFrame, out_dir: Path) -> dict[str, Path]:
+    """Write the four tiered subset CSVs + evidence summary + missingness.
+
+    Subset CSVs reindex to the feature set's full column list so that
+    optional/planned features that the pipeline did not emit appear as empty
+    (NA) columns rather than being silently dropped. The core file therefore
+    never contains a Tier 2/3/4 feature, and the exploratory file contains
+    every implemented feature.
+    """
+    out_dir = Path(out_dir)
+    paths: dict[str, Path] = {}
+    available = list(df.columns)
+
+    for set_name, filename in _FEATURE_SET_FILENAMES.items():
+        cols = fs.subset_columns(set_name, available)
+        # Reindex: keep order, fill absent columns with NA.
+        subset = df.reindex(columns=cols)
+        p = out_dir / filename
+        subset.to_csv(p, index=False)
+        paths[set_name] = p
+
+    # feature_evidence_summary.csv
+    summary_path = out_dir / "feature_evidence_summary.csv"
+    pd.DataFrame(er.evidence_summary_records()).to_csv(summary_path, index=False)
+    paths["feature_evidence_summary"] = summary_path
+
+    # feature_missingness_by_tier.csv
+    miss_path = out_dir / "feature_missingness_by_tier.csv"
+    pd.DataFrame(_missingness_by_tier(df)).to_csv(miss_path, index=False)
+    paths["feature_missingness_by_tier"] = miss_path
+
+    return paths
+
+
+def _missingness_by_tier(df: pd.DataFrame) -> list[dict]:
+    """Per-tier feature availability across the cohort.
+
+    A feature is "available" if a resolvable column (canonical name or an
+    alias) exists in the frame and is non-null for at least one case.
+    """
+    available = set(df.columns)
+    rows: list[dict] = []
+    for tier in er.EvidenceTier:
+        specs = er.by_tier(tier)
+        n_features = len(specs)
+        n_available = 0
+        for spec in specs:
+            col = er.resolve_to_columns(spec.feature_name, available)
+            if col is not None and col in df.columns and df[col].notna().any():
+                n_available += 1
+        n_missing = n_features - n_available
+        pct = round(100.0 * n_missing / n_features, 2) if n_features else 0.0
+        rows.append({
+            "evidence_tier": tier.value,
+            "n_features": n_features,
+            "n_available": n_available,
+            "n_missing": n_missing,
+            "percent_missing": pct,
+        })
+    return rows
 
 
 def append_processing_log(

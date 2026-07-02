@@ -40,6 +40,17 @@ fat:
   body_air_threshold_hu: -250.0
   exclude_bone_for_fat: true
   exclude_vessels_hu_min: 120.0
+  # When TotalSegmentator/VISTA/manual masks are provided, use them as
+  # conservative non-fat anatomy priors for local PP/RG/SG/RP fat ROIs.
+  use_anatomy_priors: true
+  anatomy_prior_dilation_mm: 1.0
+  parapharyngeal_sector_min_lateral_fraction: 0.75
+  # Optional TotalSegmentator/VISTA vertebra/prevertebral masks. If provided,
+  # RP fat uses the anterior vertebral boundary as its posterior limit.
+  prevertebral_mask_paths: []
+  retropharyngeal_use_oropharyngeal_window: true
+  retropharyngeal_prevertebral_margin_mm: 1.0
+  retropharyngeal_lateral_margin_mm: 5.0
 
 coverage:
   include_hard_palate: optional
@@ -79,3 +90,49 @@ clinical:
   clinical_csv_path: null
   patient_id_column: patient_id
   scan_id_column: scan_id
+
+tongue:
+  enabled: true
+  require_mask_for_volume: true
+  # Disabled by default: CTA-only posterior tongue boxes were visually unstable.
+  # Provide an external mask to generate tongue features/masks.
+  allow_posterior_roi_fallback: false
+  low_hu_threshold: 30.0
+  low_hu_threshold_mode: absolute
+  record_contrast_sensitivity: true
+  external_mask_path: null
+
+mandible:
+  enabled: true
+  # Disabled by default: high-HU connected components can select non-mandible bone.
+  # Provide an external/manual mask for mandible features.
+  allow_bone_threshold_fallback: false
+  bone_hu_min: 250.0
+  require_mask_for_volume: true
+  bone_min_volume_ml: 5.0
+  external_mask_path: null
+  # Real dental-pipeline mandible/jawbone mask, e.g. lower_jawbone.nii.gz.
+  # This is preferred over any CTA-only fallback when provided.
+  dental_mandible_mask_path: null
+
+# ---------------------------------------------------------------------------
+# Evidence-aware feature selection
+# ---------------------------------------------------------------------------
+# The pipeline ALWAYS computes every implemented feature. These blocks only
+# govern which tiered subset CSVs are written and which set is the default
+# modelling target recorded per run. See docs/stroke_cta_osa/FEATURE_SETS.md.
+feature_selection:
+  output_all_features: true
+  output_feature_sets: true
+  default_modeling_feature_set: core_osa_backed
+  allowed_feature_sets:
+    - core_osa_backed                 # Tier 1 only — primary phenotype
+    - core_plus_anatomic_extensions   # Tier 1 + Tier 2
+    - core_plus_cardiometabolic_ct    # Tier 1 + Tier 3
+    - all_features_exploratory        # Tier 1-4 + radiomics + composites
+
+evidence_tiers:
+  include_tier_1_core_osa_backed: true
+  include_tier_2_osa_plausible_ct_anatomic: true
+  include_tier_3_ct_cardiometabolic_or_vascular: true
+  include_tier_4_stroke_cta_novel_exploratory: true

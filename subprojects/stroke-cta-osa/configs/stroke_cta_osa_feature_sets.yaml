@@ -1,0 +1,74 @@
+# stroke_cta_osa — evidence-tiered feature-set specification
+#
+# This file is the human-readable companion to
+# stroke_cta_osa.feature_sets / stroke_cta_osa.evidence_registry. It documents
+# the four canonical feature sets, the evidence-tier→fat-compartment mapping,
+# and the HU thresholding profiles. The Python registry is the source of truth;
+# this YAML mirrors it for review and for downstream analysis pipelines that
+# prefer config over imports.
+
+evidence_tiers:
+  TIER_1_CORE_OSA_BACKED:
+    meaning: Direct adult OSA imaging support (CT/CBCT/MRI). Primary phenotype.
+    analysis_role: primary_candidate
+  TIER_2_OSA_PLAUSIBLE_CT_ANATOMIC:
+    meaning: Anatomically grounded CT/CTA, plausible for OSA, not established.
+    analysis_role: mechanistic_secondary
+  TIER_3_CT_CARDIOMETABOLIC_OR_VASCULAR:
+    meaning: CT adiposity/vascular features from cardiometabolic literature.
+    analysis_role: cardiometabolic_secondary
+  TIER_4_STROKE_CTA_NOVEL_EXPLORATORY:
+    meaning: Novel engineered/radiomic/model features requiring validation.
+    analysis_role: exploratory
+
+feature_sets:
+  core_osa_backed:
+    includes_tiers: [TIER_1_CORE_OSA_BACKED]
+    purpose: Primary analysis set. Only features with prior OSA imaging support.
+  core_plus_anatomic_extensions:
+    includes_tiers: [TIER_1_CORE_OSA_BACKED, TIER_2_OSA_PLAUSIBLE_CT_ANATOMIC]
+    purpose: Secondary anatomy-grounded mechanism discovery.
+  core_plus_cardiometabolic_ct:
+    includes_tiers: [TIER_1_CORE_OSA_BACKED, TIER_3_CT_CARDIOMETABOLIC_OR_VASCULAR]
+    purpose: Stroke / MACE / AF / AFDAS / metabolic-risk modelling.
+  all_features_exploratory:
+    includes_tiers:
+      - TIER_1_CORE_OSA_BACKED
+      - TIER_2_OSA_PLAUSIBLE_CT_ANATOMIC
+      - TIER_3_CT_CARDIOMETABOLIC_OR_VASCULAR
+      - TIER_4_STROKE_CTA_NOVEL_EXPLORATORY
+    purpose: Hypothesis generation, ML, radiomics, future manuscripts.
+
+# Fat HU thresholding. The primary threshold defines all Tier 1-3 fat volumes;
+# sensitivity profiles are opt-in for robustness analyses only.
+fat:
+  evidence_aware_compartments: true
+  primary_threshold:
+    name: default
+    hu_min: -190
+    hu_max: -30
+  sensitivity_thresholds:
+    enabled: false
+    profiles:
+      - {name: hu200_50, hu_min: -200, hu_max: -50}
+      - {name: strict,   hu_min: -150, hu_max: -50}
+
+  compartments:
+    tier_1_core_osa_backed:
+      cervical_total: true
+      cervical_subcutaneous_internal_proxy: true
+      pharyngeal_airway_adjacent_fat: true
+      parapharyngeal_fat_pad: true
+    tier_2_osa_plausible_ct_anatomic:
+      retropharyngeal: true
+      submandibular_submental: true
+      surface_shells: true
+      periairway_shells: true
+      supraplatysmal_subplatysmal_proxies: true
+    tier_3_ct_cardiometabolic_or_vascular:
+      c5_nat_compartments: true
+      pericarotid: false
+    tier_4_stroke_cta_novel_exploratory:
+      engineered_ratios: true
+      untrained_composites: false
+      radiomics: false

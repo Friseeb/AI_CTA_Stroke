@@ -216,13 +216,16 @@ class CTAFallbackAirwayAdapter:
     name = "threshold_connected_component"
 
     def __init__(self, air_hu_max: float, min_component_volume_ml: float,
-                 closing_mm: float, min_vertical_extent_mm: float = 60.0) -> None:
+                 closing_mm: float, min_vertical_extent_mm: float = 60.0,
+                 max_slice_area_mm2: float = 3000.0) -> None:
         self.air_hu_max = float(air_hu_max)
         self.min_component_volume_ml = float(min_component_volume_ml)
         self.closing_mm = float(closing_mm)
         # The pharynx + trachea tree is always many cm tall. Anything shorter
         # is a sinus pocket or sub-glottic remnant: reject it.
         self.min_vertical_extent_mm = float(min_vertical_extent_mm)
+        # Per-axial-slice cross-section above which the air is lung, not airway.
+        self.max_slice_area_mm2 = float(max_slice_area_mm2)
 
     def is_available(self) -> bool:
         return True
@@ -256,26 +259,40 @@ class CTAFallbackAirwayAdapter:
              tube; sinuses are short.
         """
         from scipy import ndimage
+        from .rois import body_mask
         arr = image.array
-        soft = arr > -250  # soft-tissue threshold — matches `body_air_threshold_hu` default
-        if not soft.any():
+        # Step 1: largest-CC soft-tissue silhouette with axial holes filled. This
+        # is exactly rois.body_mask, which is already memory-optimised (bincount
+        # for the largest component, frees its int32 label volume, in-place
+        # fill). Reusing it avoids duplicating a full-volume connected-component
+        # pass and its ~2 GB label array here.
+        filled = body_mask(image, -250.0)  # threshold matches body_air_threshold_hu
+        if not filled.any():
             return None
-        labeled, n = ndimage.label(soft)
-        if n == 0:
-            return None
-        sizes = ndimage.sum_labels(np.ones_like(soft), labeled, range(1, n + 1))
-        body_id = int(np.argmax(sizes)) + 1
-        body = (labeled == body_id)
-        # Fill the body silhouette per axial slice so internal air becomes part
-        # of "body". The actual air voxels we want are then body ∩ HU<air_hu_max.
-        filled = np.zeros_like(body)
-        for z in range(body.shape[0]):
-            filled[z] = ndimage.binary_fill_holes(body[z])
+        # Step 2: internal air = silhouette ∩ HU<air_hu_max (airway + sinuses +
+        # ears + lungs if in FOV). Free the silhouette immediately afterwards.
         internal_air = filled & (arr < self.air_hu_max)
+        del filled
         if not internal_air.any():
             return None
 
+        # Break the pharynx→trachea→bronchi→LUNG leak: on tall CTAs the whole
+        # air tree is one connected component. Any axial slice whose internal-air
+        # cross-section is lung-scale is dropped, which severs the airway column
+        # from the lungs *before* labelling, so components separate cleanly and
+        # the size×extent selector picks the pharyngeal/tracheal column, not the
+        # lungs. Pharyngeal/tracheal slices are well under the cap.
+        if self.max_slice_area_mm2 > 0:
+            dxdy = float(image.spacing_xyz_mm[0]) * float(image.spacing_xyz_mm[1])
+            slice_area = internal_air.sum(axis=(1, 2)) * dxdy
+            internal_air[slice_area > self.max_slice_area_mm2] = False
+            if not internal_air.any():
+                return None
+
+        # Step 3: connected components of internal air. The label volume encodes
+        # `internal_air`, so we can drop the bool mask right after labelling.
         labeled2, n2 = ndimage.label(internal_air)
+        del internal_air
         if n2 == 0:
             return None
         vox_ml = image.voxel_volume_mm3 / 1000.0
@@ -287,9 +304,11 @@ class CTAFallbackAirwayAdapter:
         best_score = -1
         fallback_id = None
         fallback_size = -1
-        comp_sizes = ndimage.sum_labels(
-            np.ones_like(internal_air), labeled2, range(1, n2 + 1)
-        )
+        # Per-label sizes via bincount (no full-volume np.ones weight array) and
+        # per-label z-extents via one find_objects pass (no full-volume
+        # `labeled2 == comp_id` comparison per candidate).
+        comp_sizes = np.bincount(labeled2.ravel())[1:]  # index k → label k+1
+        bboxes = ndimage.find_objects(labeled2)
         # Iterate largest-first so we can early-exit on the airway tree.
         for comp_id in (int(np.argsort(-comp_sizes)[k]) + 1 for k in range(n2)):
             size = int(comp_sizes[comp_id - 1])
@@ -298,8 +317,8 @@ class CTAFallbackAirwayAdapter:
             if size > fallback_size:
                 fallback_size = size
                 fallback_id = comp_id
-            zs = np.where((labeled2 == comp_id).any(axis=(1, 2)))[0]
-            extent = int(zs.max() - zs.min() + 1)
+            zsl = bboxes[comp_id - 1][0]
+            extent = int(zsl.stop - zsl.start)
             if extent < min_vox_extent:
                 continue
             score = size * extent
@@ -319,6 +338,7 @@ class CTAFallbackAirwayAdapter:
             extent_note = ""
 
         mask = (labeled2 == best_id)
+        del labeled2  # the ~2 GB int32 label volume is no longer needed
         if self.closing_mm > 0:
             sx_mm, sy_mm, _ = image.spacing_xyz_mm
             r = max(1, int(round(self.closing_mm / max(min(sx_mm, sy_mm), 1e-6))))
@@ -386,6 +406,7 @@ def build_airway_provider_chain(cfg) -> list[AirwayProvider]:
             air_hu_max=cfg.hu.air_hu_max,
             min_component_volume_ml=a.min_component_volume_ml,
             closing_mm=a.morphology_closing_mm,
+            max_slice_area_mm2=getattr(a, "fallback_max_airway_slice_area_mm2", 3000.0),
         ))
     providers.append(NullAirwayAdapter())
     return providers

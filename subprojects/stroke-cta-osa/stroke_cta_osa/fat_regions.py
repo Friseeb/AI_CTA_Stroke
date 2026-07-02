@@ -17,6 +17,7 @@ from typing import Optional
 import numpy as np
 from scipy import ndimage
 
+from .anatomy_priors import combined_anatomy_exclusion_mask
 from .config import FatConfig, HUConfig
 from .geometry import mm_to_voxels, slice_area_mm2
 from .landmark_schema import LandmarkBundle
@@ -24,6 +25,10 @@ from .landmarks import (
     get_hyoid_position, get_retroglossal_level, get_retropalatal_level,
 )
 from .logging_utils import get_logger
+from .rois import (
+    parapharyngeal_sector_bands, retropharyngeal_prevertebral_band,
+    subcutaneous_band,
+)
 from .types import AirwayMaskInfo, CTAImage
 
 log = get_logger("fat_regions")
@@ -41,7 +46,11 @@ class FatRegionConfig:
     retropharyngeal_posterior_band_mm: float = 15.0
     retropharyngeal_axial_window_mm: float = 30.0
     body_air_threshold_hu: float = -250.0
+    subcutaneous_erosion_mm: float = 6.0
     enable_facial_fat: bool = False
+    use_anatomy_priors: bool = True
+    anatomy_prior_dilation_mm: float = 1.0
+    parapharyngeal_sector_min_lateral_fraction: float = 0.75
 
 
 def compute_regional_fat_features(
@@ -52,6 +61,7 @@ def compute_regional_fat_features(
     body_mask: Optional[np.ndarray],
     landmarks: LandmarkBundle,
     save_masks_callback=None,
+    anatomy_masks: Optional[dict[str, Optional[np.ndarray]]] = None,
 ) -> dict[str, object]:
     out = _empty_row()
     if not cfg.enabled or airway is None or not airway.is_present:
@@ -63,6 +73,20 @@ def compute_regional_fat_features(
     in_plane = slice_area_mm2(image.spacing_xyz_mm)
     fat_voxels = ((image.array >= cfg.fat_hu_min)
                   & (image.array <= cfg.fat_hu_max))
+    deep_mask = body_mask & ~subcutaneous_band(
+        body_mask, cfg.subcutaneous_erosion_mm, image.spacing_xyz_mm
+    )
+    anatomy_exclusion, anatomy_used = combined_anatomy_exclusion_mask(
+        anatomy_masks,
+        reference_shape=image.shape_zyx,
+        spacing_xyz_mm=image.spacing_xyz_mm,
+        dilation_mm=cfg.anatomy_prior_dilation_mm,
+    )
+    anatomy_prior_available = bool(cfg.use_anatomy_priors and anatomy_used)
+    deep_mask_for_local_rois = (
+        deep_mask & ~anatomy_exclusion if anatomy_prior_available else deep_mask
+    )
+    out["fat_regional_anatomy_prior_masks_used"] = ",".join(anatomy_used)
 
     # ---- Cervical-fat area at standard z levels ----
     cerv_fat = fat_voxels & body_mask
@@ -89,13 +113,34 @@ def compute_regional_fat_features(
                                    _subglosso_anchor(rg_z, sz_mm))):
         if anchor_z is None or not (0 <= anchor_z < cerv_fat.shape[0]):
             continue
-        left, right = _per_side_parapharyngeal(
-            image=image, airway_mask=airway.mask_zyx,
-            anchor_z=anchor_z,
-            lateral_band_mm=cfg.parapharyngeal_lateral_band_mm,
-            window_mm=cfg.parapharyngeal_axial_window_mm,
-            body_mask=body_mask, fat_voxels=fat_voxels,
-        )
+        if anatomy_prior_available:
+            left_roi, right_roi, method = parapharyngeal_sector_bands(
+                image=image,
+                airway_mask=airway.mask_zyx,
+                lateral_band_mm=cfg.parapharyngeal_lateral_band_mm,
+                axial_window_mm=cfg.parapharyngeal_axial_window_mm,
+                z_anchor=anchor_z,
+                anatomy_exclusion_mask=anatomy_exclusion,
+                min_lateral_fraction=(
+                    cfg.parapharyngeal_sector_min_lateral_fraction
+                ),
+            )
+            left = left_roi & fat_voxels & deep_mask_for_local_rois
+            right = right_roi & fat_voxels & deep_mask_for_local_rois
+            out["fat_regional_parapharyngeal_roi_method"] = (
+                f"{method}_anatomy_prior_sector_deep_fat_gated"
+            )
+        else:
+            left, right = _per_side_parapharyngeal(
+                image=image, airway_mask=airway.mask_zyx,
+                anchor_z=anchor_z,
+                lateral_band_mm=cfg.parapharyngeal_lateral_band_mm,
+                window_mm=cfg.parapharyngeal_axial_window_mm,
+                body_mask=deep_mask, fat_voxels=fat_voxels,
+            )
+            out["fat_regional_parapharyngeal_roi_method"] = (
+                "airway_relative_box_deep_fat_gated"
+            )
         # Area at the anchor slice
         a_left = float(left[anchor_z].sum() * in_plane) if left.any() else 0.0
         a_right = float(right[anchor_z].sum() * in_plane) if right.any() else 0.0
@@ -114,13 +159,28 @@ def compute_regional_fat_features(
             save_masks_callback(f"fat_parapharyngeal_{level_name}_right", right)
 
     # ---- Retropharyngeal area at standard z levels ----
-    rp_band = _retropharyngeal_band(
-        image=image, airway_mask=airway.mask_zyx,
-        posterior_band_mm=cfg.retropharyngeal_posterior_band_mm,
-        window_mm=cfg.retropharyngeal_axial_window_mm,
-        anchor_z=rp_z if rp_z is not None else rg_z,
+    prevertebral_mask = (
+        np.asarray(anatomy_masks.get("prevertebral")).astype(bool)
+        if anatomy_masks and anatomy_masks.get("prevertebral") is not None
+        else None
     )
-    rp_fat = rp_band & fat_voxels & body_mask
+    if prevertebral_mask is not None and prevertebral_mask.any():
+        rp_band, _ = retropharyngeal_prevertebral_band(
+            image=image,
+            airway_mask=airway.mask_zyx,
+            posterior_band_mm=cfg.retropharyngeal_posterior_band_mm,
+            axial_window_mm=cfg.retropharyngeal_axial_window_mm,
+            z_anchor=rp_z if rp_z is not None else rg_z,
+            prevertebral_mask=prevertebral_mask,
+        )
+    else:
+        rp_band = _retropharyngeal_band(
+            image=image, airway_mask=airway.mask_zyx,
+            posterior_band_mm=cfg.retropharyngeal_posterior_band_mm,
+            window_mm=cfg.retropharyngeal_axial_window_mm,
+            anchor_z=rp_z if rp_z is not None else rg_z,
+        )
+    rp_fat = rp_band & fat_voxels & deep_mask_for_local_rois
     if rp_z is not None and 0 <= rp_z < rp_fat.shape[0]:
         out["fat_retropharyngeal_area_at_retropalatal_level_mm2"] = round(
             float(rp_fat[rp_z].sum() * in_plane), 2)
@@ -152,6 +212,8 @@ def _empty_row() -> dict[str, object]:
         "fat_buccal_left_volume_ml": _NAN,
         "fat_buccal_right_volume_ml": _NAN,
         "fat_facial_to_parapharyngeal_ratio": _NAN,
+        "fat_regional_anatomy_prior_masks_used": "",
+        "fat_regional_parapharyngeal_roi_method": "",
     }
     for level in ("retropalatal", "retroglossal", "subglosso_supraglottic"):
         for side in ("left", "right", "total"):

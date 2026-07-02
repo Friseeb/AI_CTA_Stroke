@@ -4,7 +4,7 @@ encroachment, tongue/mandible & tongue/oral-cavity ratios).
 The module is mask-driven. Inputs:
 
   * `tongue_mask` — externally segmented binary mask (preferred), OR
-  * landmark-based conservative posterior tongue ROI (fallback).
+  * landmark- or airway-anchored conservative posterior tongue ROI (fallback).
 
 When neither is available, every feature is NaN with `tongue_mask_available =
 False`. We never invent a global tongue volume from heuristics: tongue body
@@ -45,7 +45,7 @@ _NAN = float("nan")
 class TongueConfig:
     enabled: bool = True
     require_mask_for_volume: bool = True
-    allow_posterior_roi_fallback: bool = True
+    allow_posterior_roi_fallback: bool = False
     low_hu_threshold: float = 30.0
     low_hu_threshold_mode: str = "absolute"
     record_contrast_sensitivity: bool = True
@@ -339,24 +339,41 @@ def _landmark_posterior_tongue_box(
         (in axis-1 voxels).
     X band:
         airway L-R extent at retroglossal_level expanded by ±10 mm.
-    Returns (None, method, conf) if landmarks aren't enough to anchor.
+    Returns (None, method, conf) if neither landmarks nor airway geometry can
+    anchor a reproducible low-confidence ROI.
     """
     rg = get_retroglossal_level(landmarks)
     base_z = get_tongue_base_level(landmarks) or rg
+    anchor_method = "landmark_box"
+    if base_z is None and airway is not None and airway.is_present:
+        per_slice = airway.mask_zyx.sum(axis=(1, 2))
+        nonzero = np.where(per_slice > 0)[0]
+        if nonzero.size:
+            csa = np.where(per_slice > 0, per_slice, np.iinfo(np.int64).max)
+            base_z = int(np.argmin(csa))
+            anchor_method = "airway_min_csa_box"
     if base_z is None or airway is None or not airway.is_present:
         return None, "no_anchor", "low"
     sx, sy, sz = image.spacing_xyz_mm
     half_z = max(1, int(round(15.0 / sz)))
-    anchor = base_z if base_z is not None else rg
+    anchor = base_z
     z_lo = max(0, anchor - half_z)
     z_hi = min(airway.mask_zyx.shape[0] - 1, anchor + half_z)
     box = np.zeros_like(airway.mask_zyx)
 
     # Use the anchor slice's airway extent as the L-R anchor.
-    z_for_xyref = anchor if 0 <= anchor < airway.mask_zyx.shape[0] else rg
-    sl = airway.mask_zyx[z_for_xyref]
+    z_for_xyref = anchor if 0 <= anchor < airway.mask_zyx.shape[0] else None
+    sl = airway.mask_zyx[z_for_xyref] if z_for_xyref is not None else np.zeros(
+        airway.mask_zyx.shape[1:], dtype=bool
+    )
     if not sl.any():
-        return None, "airway_empty_at_anchor", "low"
+        nonzero = np.where(airway.mask_zyx.sum(axis=(1, 2)) > 0)[0]
+        if nonzero.size == 0:
+            return None, "airway_empty_at_anchor", "low"
+        z_for_xyref = int(nonzero[np.argmin(np.abs(nonzero - anchor))])
+        sl = airway.mask_zyx[z_for_xyref]
+        if not sl.any():
+            return None, "airway_empty_at_anchor", "low"
     ys, xs = np.where(sl)
     margin_x = max(1, int(round(10.0 / sx)))
     margin_y_back = max(1, int(round(30.0 / sy)))
@@ -369,7 +386,7 @@ def _landmark_posterior_tongue_box(
         return None, "degenerate_box", "low"
 
     box[z_lo:z_hi + 1, y_lo:y_hi + 1, x_lo:x_hi + 1] = True
-    return box, "landmark_box_z={}_y=[{},{}]".format(anchor, y_lo, y_hi), "low"
+    return box, "{}_z={}_y=[{},{}]".format(anchor_method, anchor, y_lo, y_hi), "low"
 
 
 def _tongue_base_airway_displacements(

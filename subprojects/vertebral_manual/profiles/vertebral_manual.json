@@ -1,0 +1,59 @@
+{
+  "profile_id": "vertebral_manual",
+  "profile_label": "CTA Vertebral Manual Segmentation",
+  "version": "0.4.0",
+  "default_review_status": "in_progress",
+  "context_masks": [
+    {
+      "id": "vertebral_artery_left",
+      "label": "Vert L",
+      "required": false,
+      "color": [0.0, 0.75, 0.35]
+    },
+    {
+      "id": "vertebral_artery_right",
+      "label": "Vert R",
+      "required": false,
+      "color": [0.85, 0.9, 0.0]
+    },
+    {
+      "id": "vertebral_foramen_negative_prior",
+      "label": "Foramen prior",
+      "required": false,
+      "negative_prior": true,
+      "color": [0.05, 0.35, 1.0]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "vertebral_centerline_L",
+      "label": "Vert curve L",
+      "side": "left",
+      "markup_type": "curve",
+      "required": true,
+      "min_points": 2,
+      "max_points": null,
+      "color": [0.0, 0.75, 0.35],
+      "instruction": "Draw a curve through the left vertebral artery."
+    },
+    {
+      "id": "vertebral_centerline_R",
+      "label": "Vert curve R",
+      "side": "right",
+      "markup_type": "curve",
+      "required": true,
+      "min_points": 2,
+      "max_points": null,
+      "color": [0.85, 0.9, 0.0],
+      "instruction": "Draw a curve through the right vertebral artery."
+    }
+  ],
+  "review_status_options": [
+    "in_progress",
+    "accepted",
+    "needs_second_review",
+    "rejected_bad_image",
+    "rejected_bad_segmentation",
+    "deferred"
+  ]
+}

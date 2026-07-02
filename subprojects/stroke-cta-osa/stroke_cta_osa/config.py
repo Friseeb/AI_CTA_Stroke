@@ -48,6 +48,11 @@ class AirwayConfig(BaseModel):
     external_mask_path: Optional[str] = None
     min_component_volume_ml: float = 1.0
     morphology_closing_mm: float = 1.0
+    # Fallback airway can leak pharynx→trachea→bronchi→LUNGS into one component
+    # on tall CTAs. Any axial slice of the chosen air component exceeding this
+    # cross-section is lung-scale and is dropped, breaking the connection so only
+    # the pharyngeal/tracheal column survives. 0 disables the cap.
+    fallback_max_airway_slice_area_mm2: float = 3000.0
     centerline_orthogonal_csa: bool = False  # axial-CSA only in v1
     retropalatal_window_mm: float = 15.0
     retroglossal_window_mm: float = 15.0
@@ -63,6 +68,33 @@ class FatConfig(BaseModel):
     body_air_threshold_hu: float = -250.0
     exclude_bone_for_fat: bool = True
     exclude_vessels_hu_min: float = 120.0  # contrast-enhanced vessel exclusion
+    use_anatomy_priors: bool = True
+    anatomy_prior_dilation_mm: float = 1.0
+    parapharyngeal_sector_min_lateral_fraction: float = 0.75
+    prevertebral_mask_paths: list[str] = Field(default_factory=list)
+    retropharyngeal_use_oropharyngeal_window: bool = True
+    retropharyngeal_prevertebral_margin_mm: float = 1.0
+    retropharyngeal_lateral_margin_mm: float = 5.0
+    # --- Anatomically-constrained neck slab (FOV-robust cervical fat) ---
+    # The plain cervical volume scales with the imaged z-extent, which on tall
+    # head-to-chest CTAs badly inflates it. Anchoring a fixed-height slab on the
+    # airway min-CSA slice and reporting fractions/ratios removes that FOV
+    # dependence. See stroke_cta_osa.fat._anchored_neck_features.
+    neck_slab_enabled: bool = True
+    neck_slab_half_height_mm: float = 40.0   # ±40 mm ⇒ ~8 cm neck slab
+    neck_slab_anchor: Literal["min_csa", "cervical_zrange"] = "min_csa"
+    # In-plane containment: a cylinder of this radius around the airway centroid,
+    # so shoulders / arms / immobilisation padding (all low-HU, else miscounted
+    # as fat) are excluded. 0 disables in-plane containment.
+    neck_slab_radius_mm: float = 75.0
+    # The airway min-CSA anchor sits at the tongue-base / retroglossal level,
+    # which is fat-rich (floor of mouth, submandibular) and abuts the air-filled
+    # oropharynx. Shift the slab centre inferiorly by this much so it sits over
+    # the true mid-cervical neck (hyoid/thyroid level). Assumes RAS orientation
+    # (the ingestion default); clamped to stay within the imaged airway span.
+    # Default 0: testing showed it did not reduce the high-fat tail (that was an
+    # airway-segmentation leak, fixed via fallback_max_airway_slice_area_mm2).
+    neck_slab_inferior_offset_mm: float = 0.0
 
 
 class RadiomicsConfig(BaseModel):
@@ -82,7 +114,7 @@ class TongueConfig(BaseModel):
     """Tongue-module configuration; see `stroke_cta_osa.tongue`."""
     enabled: bool = True
     require_mask_for_volume: bool = True
-    allow_posterior_roi_fallback: bool = True
+    allow_posterior_roi_fallback: bool = False
     low_hu_threshold: float = 30.0
     low_hu_threshold_mode: Literal["absolute", "relative"] = "absolute"
     record_contrast_sensitivity: bool = True
@@ -91,11 +123,12 @@ class TongueConfig(BaseModel):
 
 class MandibleConfig(BaseModel):
     enabled: bool = True
-    allow_bone_threshold_fallback: bool = True
+    allow_bone_threshold_fallback: bool = False
     bone_hu_min: float = 250.0
-    require_mask_for_volume: bool = False
+    require_mask_for_volume: bool = True
     bone_min_volume_ml: float = 5.0
     external_mask_path: Optional[str] = None
+    dental_mandible_mask_path: Optional[str] = None
 
 
 class OralCavityConfig(BaseModel):
@@ -173,6 +206,33 @@ class ClinicalMergeConfig(BaseModel):
     scan_id_column: str = "scan_id"
 
 
+class FeatureSelectionConfig(BaseModel):
+    """Which evidence-gated feature sets to emit and which is the default.
+
+    The pipeline always computes every implemented feature; this block only
+    governs the *subset* CSVs and the default modelling set recorded per run.
+    """
+    output_all_features: bool = True
+    output_feature_sets: bool = True
+    default_modeling_feature_set: Literal[
+        "core_osa_backed", "core_plus_anatomic_extensions",
+        "core_plus_cardiometabolic_ct", "all_features_exploratory",
+    ] = "core_osa_backed"
+    allowed_feature_sets: list[str] = Field(default_factory=lambda: [
+        "core_osa_backed", "core_plus_anatomic_extensions",
+        "core_plus_cardiometabolic_ct", "all_features_exploratory",
+    ])
+
+
+class EvidenceTiersConfig(BaseModel):
+    """Toggle whole evidence tiers on/off. Tier 1 cannot be disabled here —
+    the core OSA-backed set must always be available."""
+    include_tier_1_core_osa_backed: bool = True
+    include_tier_2_osa_plausible_ct_anatomic: bool = True
+    include_tier_3_ct_cardiometabolic_or_vascular: bool = True
+    include_tier_4_stroke_cta_novel_exploratory: bool = True
+
+
 class OutputConfig(BaseModel):
     save_masks: bool = False
     save_qc_images: bool = True
@@ -212,6 +272,12 @@ class PipelineConfig(BaseModel):
     fat_regions: FatRegionConfig = Field(default_factory=FatRegionConfig)
     landmarks: LandmarkConfig = Field(default_factory=LandmarkConfig)
     composites: CompositesConfig = Field(default_factory=CompositesConfig)
+
+    # ---- evidence-aware feature selection (additive) ----
+    feature_selection: FeatureSelectionConfig = Field(
+        default_factory=FeatureSelectionConfig)
+    evidence_tiers: EvidenceTiersConfig = Field(
+        default_factory=EvidenceTiersConfig)
 
     def hash(self) -> str:
         """SHA-1 of the JSON-serialised config. Recorded per case so feature

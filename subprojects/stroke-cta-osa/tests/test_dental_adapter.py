@@ -7,6 +7,7 @@ import numpy as np
 import SimpleITK as sitk
 
 from stroke_cta_osa.adapters import DentalAirwayAdapter
+from stroke_cta_osa.cli import _discover_dental_artifacts
 
 
 def test_dental_adapter_unavailable_when_paths_missing():
@@ -74,3 +75,41 @@ def test_dental_adapter_payload_features_flow_into_orchestrator(
     assert row["airway_volume_ml_from_dental"] == 99.9
     # The CTA-recomputed value should still be present (and different)
     assert row["airway_volume_ml"] != 99.9
+
+
+def test_dental_artifact_discovery_finds_lower_jawbone(tmp_path):
+    case_dir = tmp_path / "sub-001" / "roi" / "_tseg_teeth"
+    case_dir.mkdir(parents=True)
+    jaw = case_dir / "lower_jawbone.nii.gz"
+    jaw.write_bytes(b"placeholder")
+
+    found = _discover_dental_artifacts(tmp_path, case_id="sub-001")
+
+    assert found["mandible"] == jaw
+
+
+def test_dental_mandible_mask_flows_into_orchestrator(
+    synth_nifti_path, synth_array, tmp_path,
+):
+    from stroke_cta_osa.config import PipelineConfig, apply_overrides
+    from stroke_cta_osa.features import extract_case
+
+    mask = np.zeros_like(synth_array, dtype=np.uint8)
+    mask[60:68, 20:34, 20:60] = 1
+    img = sitk.GetImageFromArray(mask)
+    img.SetSpacing((1.0, 1.0, 1.0))
+    img.SetOrigin((0.0, 0.0, 0.0))
+    img.SetDirection((1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0))
+    jaw_path = tmp_path / "lower_jawbone.nii.gz"
+    sitk.WriteImage(img, str(jaw_path), useCompression=True)
+
+    cfg = apply_overrides(PipelineConfig(), {
+        "mandible.dental_mandible_mask_path": str(jaw_path),
+    })
+    result = extract_case(
+        synth_nifti_path, tmp_path, cfg, patient_id="dental_jawbone",
+    )
+
+    assert result.mandible["mandible_mask_available"] is True
+    assert result.mandible["mandible_mask_method"] == "dental_mandible_mask"
+    assert result.mandible["mandible_volume_ml"] > 0

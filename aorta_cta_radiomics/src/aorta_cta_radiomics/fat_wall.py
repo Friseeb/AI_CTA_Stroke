@@ -42,6 +42,7 @@ def extract_fat_closed_aortic_wall(
     lumen_reference_statistic: str = "median",
     require_lumen_seed_connectivity: bool = False,
     use_input_aorta_as_lumen_floor: bool = False,
+    lumen_floor_mask: np.ndarray | None = None,
     smooth_lumen_profile_mm: float = 10.0,
     min_core_voxels_per_slice: int = 20,
     wall_hu_min: float = -30.0,
@@ -68,6 +69,11 @@ def extract_fat_closed_aortic_wall(
     fat = np.asarray(fat_mask, dtype=bool)
     if image_array.shape != aorta.shape or fat.shape != aorta.shape:
         raise ValueError("image, aorta_mask, and fat_mask must have the same shape.")
+    extra_lumen_floor = None
+    if lumen_floor_mask is not None:
+        extra_lumen_floor = np.asarray(lumen_floor_mask, dtype=bool)
+        if extra_lumen_floor.shape != aorta.shape:
+            raise ValueError("lumen_floor_mask must have the same shape as aorta_mask.")
     if not aorta.any():
         empty = np.zeros_like(aorta, dtype=bool)
         return FatClosedWallResult(
@@ -113,10 +119,15 @@ def extract_fat_closed_aortic_wall(
         min_core_voxels_per_slice=min_core_voxels_per_slice,
         exclude_hu_at_or_above=exclude_calcification_hu,
     )
+    lumen_floor = aorta.copy() if bool(use_input_aorta_as_lumen_floor) else np.zeros_like(aorta, dtype=bool)
+    if extra_lumen_floor is not None:
+        lumen_floor |= extra_lumen_floor
     if bool(use_input_aorta_as_lumen_floor):
-        lumen = aorta.copy()
-        if exclude_calcification_hu is not None:
-            lumen &= image_array < float(exclude_calcification_hu)
+        # The input VISTA aorta is the minimum accepted lumen/aorta trace.
+        # HU thresholds may add adjacent contrast-filled voxels, but they must
+        # not shrink the input trace. Calcium handling is deferred to downstream
+        # wall/thickness stages that receive an explicit calcium mask.
+        lumen |= lumen_floor
     if bool(lumen_correction_enabled):
         correction_roi = aorta | external_shell(
             aorta,
@@ -146,6 +157,8 @@ def extract_fat_closed_aortic_wall(
             close_radius_mm=lumen_correction_close_radius_mm,
             spacing_xyz=spacing_xyz,
         )
+        if bool(use_input_aorta_as_lumen_floor):
+            lumen |= lumen_floor
     closed_outer = _closed_outer_envelope(
         aorta_mask=aorta,
         fat_support=fat_support,

@@ -25,19 +25,20 @@ dependencies = [
   "typer",
   "tqdm",
   "matplotlib",
+  "seaborn",
 ]
 
 [project.optional-dependencies]
 mesh = ["pyvista", "trimesh"]
 monai = ["monai", "torch"]
-encoders = ["torch", "transformers"]
-ct-fm = ["torch", "monai", "lighter-zoo"]
-all-encoders = ["torch", "transformers", "monai", "lighter-zoo"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]
 aorta-cta = "aorta_cta_radiomics.cli:main"
 aorta-cta-qc = "aorta_cta_radiomics.qc_slicer:main"
+aorta-cta-staged = "aorta_cta_radiomics.staged:main"
+aorta-cta-watchdog = "aorta_cta_radiomics.batch_watchdog:main"
+aorta-cta-progress = "aorta_cta_radiomics.batch_progress:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

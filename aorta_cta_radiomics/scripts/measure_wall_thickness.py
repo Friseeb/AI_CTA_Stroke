@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from aorta_cta_radiomics.io import read_mask, read_volume, write_label_like, write_mask_like
+from aorta_cta_radiomics.crop import crop_region_for_mask
 from aorta_cta_radiomics.wall_thickness import (
     measure_wall_thickness,
     thickness_threshold_summary,
@@ -27,6 +28,12 @@ def main() -> None:
     parser.add_argument("--calcium-mask", help="Optional calcium mask to move from lumen into wall.")
     parser.add_argument("--subtract-calcium-from-lumen", action="store_true")
     parser.add_argument("--add-calcium-to-wall", action="store_true")
+    parser.add_argument(
+        "--crop-margin-mm",
+        type=float,
+        default=0.0,
+        help="Crop around lumen/wall/calcium before distance transforms, then paste outputs back.",
+    )
     parser.add_argument("--risk-thickness-threshold-mm", type=float, default=4.0)
     args = parser.parse_args()
 
@@ -48,6 +55,18 @@ def main() -> None:
         if args.add_calcium_to_wall:
             wall = wall | calcium
     wall = wall & ~lumen
+    full_shape = lumen.shape
+    crop_region = None
+    if args.crop_margin_mm > 0:
+        crop_seed = lumen | wall
+        if calcium is not None:
+            crop_seed |= calcium
+        crop_region = crop_region_for_mask(crop_seed, image.spacing_xyz, margin_mm=float(args.crop_margin_mm))
+        lumen = crop_region.crop(lumen)
+        wall = crop_region.crop(wall)
+        if calcium is not None:
+            calcium = crop_region.crop(calcium)
+        calcium_in_lumen = crop_region.crop(calcium_in_lumen)
 
     outdir = Path(args.outdir)
     masks_dir = outdir / "masks" / args.case_id
@@ -61,6 +80,13 @@ def main() -> None:
         spacing_xyz=image.spacing_xyz,
         case_id=args.case_id,
     )
+    if crop_region is not None:
+        result = _paste_result_to_full_shape(result, crop_region, full_shape)
+        lumen = crop_region.paste(lumen)
+        wall = crop_region.paste(wall)
+        calcium_in_lumen = crop_region.paste(calcium_in_lumen)
+        if calcium is not None:
+            calcium = crop_region.paste(calcium)
 
     write_mask_like(result.lumen_mask, image.image, masks_dir / f"{args.case_id}_lumen_for_wall_thickness.nii.gz")
     write_mask_like(result.wall_mask, image.image, masks_dir / f"{args.case_id}_wall_for_thickness.nii.gz")
@@ -126,6 +152,24 @@ def _write_scalar_like(array: np.ndarray, reference_image: object, output_path: 
     out.CopyInformation(reference_image)
     sitk.WriteImage(out, str(path))
     return path
+
+
+def _paste_result_to_full_shape(result, crop_region, full_shape: tuple[int, int, int]):
+    from aorta_cta_radiomics.wall_thickness import WallThicknessResult
+
+    if crop_region.full_shape != full_shape:
+        raise ValueError("Crop region shape does not match requested full shape.")
+    return WallThicknessResult(
+        lumen_mask=crop_region.paste(result.lumen_mask),
+        wall_mask=crop_region.paste(result.wall_mask),
+        inner_surface_mask=crop_region.paste(result.inner_surface_mask),
+        outer_surface_mask=crop_region.paste(result.outer_surface_mask),
+        thickness_map_mm=crop_region.paste(result.thickness_map_mm, fill_value=0),
+        inner_surface_thickness_map_mm=crop_region.paste(result.inner_surface_thickness_map_mm, fill_value=0),
+        outer_surface_thickness_map_mm=crop_region.paste(result.outer_surface_thickness_map_mm, fill_value=0),
+        thickness_bin_labelmap=crop_region.paste(result.thickness_bin_labelmap, fill_value=0),
+        summary=result.summary,
+    )
 
 
 def _write_run_notes(path: Path, args: argparse.Namespace, calcium_in_lumen_voxels: int, wall_voxels: int) -> None:

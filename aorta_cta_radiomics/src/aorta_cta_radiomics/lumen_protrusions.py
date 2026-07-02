@@ -130,6 +130,7 @@ def detect_lumen_protrusions(
     max_candidate_outside_aorta_fraction: float | None = None,
     clip_candidate_masks_to_analysis_mask: bool = False,
     analysis_mask_override: np.ndarray | None = None,
+    contrast_exclude_mask: np.ndarray | None = None,
     software_version: str = __version__,
 ) -> LumenProtrusionResult:
     """Detect focal local boundary deviations in centerline-normal coordinates.
@@ -153,6 +154,11 @@ def detect_lumen_protrusions(
     image = np.asarray(image_hu, dtype=float) if image_hu is not None else None
     if image is not None and image.shape != lumen.shape:
         raise ValueError("image_hu must have the same shape as lumen_mask.")
+    contrast_exclude = None
+    if contrast_exclude_mask is not None:
+        contrast_exclude = np.asarray(contrast_exclude_mask, dtype=bool)
+        if contrast_exclude.shape != lumen.shape:
+            raise ValueError("contrast_exclude_mask must have the same shape as lumen_mask.")
     centerline = _extract_centerline(
         lumen,
         spacing_xyz=spacing_xyz,
@@ -235,6 +241,7 @@ def detect_lumen_protrusions(
             max_above_reference_hu=max_contrast_hu_above_reference,
             reference_lower_fraction=contrast_reference_lower_fraction,
             reference_upper_fraction=contrast_reference_upper_fraction,
+            exclude_mask=contrast_exclude,
         )
 
     actual_radii = _sample_boundary_radii(
@@ -247,6 +254,7 @@ def detect_lumen_protrusions(
         image_hu=image if intensity_gate_enabled else None,
         lower_hu_thresholds=lower_thresholds if intensity_gate_enabled else None,
         upper_hu_thresholds=upper_thresholds if intensity_gate_enabled else None,
+        contrast_exclude_mask=contrast_exclude if intensity_gate_enabled else None,
     )
     inward_expected_radii = _expected_radii(
         actual_radii,
@@ -754,6 +762,7 @@ def _global_contrast_like_mask(
     max_above_reference_hu: float | None,
     reference_lower_fraction: float | None,
     reference_upper_fraction: float | None,
+    exclude_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     if np.isfinite(centerline_hu).any():
         reference = float(np.nanmedian(centerline_hu))
@@ -773,6 +782,8 @@ def _global_contrast_like_mask(
         upper = upper_margin if upper is None else min(upper, upper_margin)
     if upper is not None:
         contrast_like &= image <= upper
+    if exclude_mask is not None:
+        contrast_like &= ~np.asarray(exclude_mask, dtype=bool)
     return contrast_like
 
 
@@ -961,6 +972,7 @@ def _sample_boundary_radii(
     image_hu: np.ndarray | None = None,
     lower_hu_thresholds: np.ndarray | None = None,
     upper_hu_thresholds: np.ndarray | None = None,
+    contrast_exclude_mask: np.ndarray | None = None,
 ) -> np.ndarray:
     try:
         from scipy import ndimage as ndi
@@ -972,6 +984,7 @@ def _sample_boundary_radii(
     output = np.full((len(centerline.points_xyz), int(angular_bins)), np.nan, dtype=float)
     lumen_float = lumen.astype(np.float32)
     image_float = image_hu.astype(np.float32) if image_hu is not None else None
+    exclude_float = contrast_exclude_mask.astype(np.float32) if contrast_exclude_mask is not None else None
     for point_index, center_xyz in enumerate(centerline.points_xyz):
         u = centerline.normal_u_xyz[point_index]
         v = centerline.normal_v_xyz[point_index]
@@ -1007,6 +1020,15 @@ def _sample_boundary_radii(
                 samples = samples & (hu_samples >= lower_threshold)
                 if upper_threshold is not None:
                     samples = samples & (hu_samples <= upper_threshold)
+                if exclude_float is not None:
+                    excluded_samples = ndi.map_coordinates(
+                        exclude_float,
+                        [sample_zyx[:, 0], sample_zyx[:, 1], sample_zyx[:, 2]],
+                        order=0,
+                        mode="constant",
+                        cval=0.0,
+                    ) > 0.5
+                    samples = samples & ~excluded_samples
             inside = np.where(samples)[0]
             if inside.size == 0:
                 continue

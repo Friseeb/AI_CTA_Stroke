@@ -32,9 +32,9 @@ _NAN = float("nan")
 @dataclass
 class MandibleConfig:
     enabled: bool = True
-    allow_bone_threshold_fallback: bool = True
+    allow_bone_threshold_fallback: bool = False
     bone_hu_min: float = 250.0
-    require_mask_for_volume: bool = False
+    require_mask_for_volume: bool = True
     bone_min_volume_ml: float = 5.0
 
 
@@ -49,6 +49,7 @@ def compute_mandible_features(
     mandible_mask: Optional[np.ndarray],
     landmarks: LandmarkBundle,
     *,
+    mandible_mask_method: str = "external_mask",
     oral_cavity_mask: Optional[np.ndarray] = None,
     oral_cavity_cfg: Optional[OralCavityConfig] = None,
     save_masks_callback=None,
@@ -64,6 +65,7 @@ def compute_mandible_features(
     mask, method = _resolve_mandible_mask(
         image, cfg,
         external_mask=mandible_mask,
+        external_mask_method=mandible_mask_method,
         save_masks_callback=save_masks_callback,
     )
     out["mandible_mask_method"] = method
@@ -130,10 +132,11 @@ def _empty_row() -> dict[str, object]:
 def _resolve_mandible_mask(
     image: CTAImage, cfg: MandibleConfig,
     *, external_mask: Optional[np.ndarray],
+    external_mask_method: str,
     save_masks_callback,
 ) -> tuple[Optional[np.ndarray], str]:
     if external_mask is not None and np.asarray(external_mask).any():
-        return np.asarray(external_mask).astype(bool), "external_mask"
+        return np.asarray(external_mask).astype(bool), external_mask_method
 
     if not cfg.allow_bone_threshold_fallback:
         return None, "absent_threshold_fallback_disabled"

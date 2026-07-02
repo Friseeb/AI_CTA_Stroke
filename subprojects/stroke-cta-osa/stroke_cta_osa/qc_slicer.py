@@ -31,8 +31,15 @@ _CATEGORY_DEFAULTS: dict[str, tuple[tuple[float, float, float], float, float, fl
     "body":                ((0.70, 0.70, 0.70), 0.10, 0.05, 0.50),
     "fat_subcutaneous":    ((1.00, 0.60, 0.00), 0.50, 0.35, 1.00),
     "fat_deep":            ((1.00, 0.40, 0.00), 0.50, 0.35, 1.00),
+    "fat_deep_peripharyngeal": ((0.40, 0.95, 0.65), 0.75, 0.45, 1.00),
     "fat_parapharyngeal":  ((1.00, 0.95, 0.00), 0.85, 0.55, 1.00),
+    "fat_parapharyngeal_rg": ((1.00, 0.82, 0.00), 0.90, 0.60, 1.00),
+    "fat_parapharyngeal_ss": ((1.00, 0.68, 0.00), 0.90, 0.60, 1.00),
     "fat_retropharyngeal": ((0.95, 0.00, 0.95), 0.85, 0.55, 1.00),
+    "mandible":            ((0.95, 0.95, 0.80), 0.70, 0.45, 1.00),
+    "prevertebral":        ((0.55, 0.55, 1.00), 0.45, 0.25, 1.00),
+    "tongue":              ((0.80, 0.20, 0.20), 0.70, 0.40, 1.00),
+    "soft_palate":         ((0.70, 0.25, 0.85), 0.70, 0.40, 1.00),
     "fat_cervical_total":  ((0.95, 0.55, 0.00), 0.15, 0.05, 0.50),
 }
 
@@ -44,9 +51,17 @@ _DEFAULT_ROSTER: list[tuple[str, str, str]] = [
     ("mask_fat_cervical_total",       "All cerv fat", "fat_cervical_total"),
     ("mask_fat_cervical_subcutaneous", "SubQ fat",   "fat_subcutaneous"),
     ("mask_fat_cervical_deep",        "Deep fat",    "fat_deep"),
-    ("mask_fat_parapharyngeal_left",  "PP fat L",    "fat_parapharyngeal"),
-    ("mask_fat_parapharyngeal_right", "PP fat R",    "fat_parapharyngeal"),
+    ("mask_fat_deep_peripharyngeal",  "Periph fat",  "fat_deep_peripharyngeal"),
     ("mask_fat_retropharyngeal",      "RP fat",      "fat_retropharyngeal"),
+    ("mask_prevertebral",             "C-spine",     "prevertebral"),
+    ("mask_mandible",                 "Mandible",    "mandible"),
+    ("mask_tongue",                   "Tongue",      "tongue"),
+    ("mask_tongue_posterior",         "Tongue post", "tongue"),
+    ("mask_tongue_base",              "Tongue base", "tongue"),
+    ("mask_soft_palate",              "Soft palate", "soft_palate"),
+    ("mask_uvula",                    "Uvula",       "soft_palate"),
+    ("mask_palatine_tonsil_left",     "Tonsil L",    "soft_palate"),
+    ("mask_palatine_tonsil_right",    "Tonsil R",    "soft_palate"),
 ]
 
 

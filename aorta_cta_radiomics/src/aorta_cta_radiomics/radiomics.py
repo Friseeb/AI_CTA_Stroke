@@ -1,7 +1,8 @@
-"""PyRadiomics integration."""
+"""Radiomics backend integration."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ import pandas as pd
 
 from . import __version__
 from .features import feature_row
+
+logger = logging.getLogger(__name__)
 
 
 def extract_radiomics_features(
@@ -19,6 +22,33 @@ def extract_radiomics_features(
     settings_path: str | Path | None = None,
     include_diagnostics: bool = False,
     software_version: str = __version__,
+    backend: str = "pyradiomics",
+    device: str = "cpu",
+) -> pd.DataFrame:
+    """Extract radiomics features for one image/mask pair."""
+    _ = device
+    backend_key = backend.lower().replace("-", "_")
+    if backend_key in {"pyradiomics", "py_radiomics"}:
+        return _extract_pyradiomics_features(
+            image_path=image_path,
+            mask_path=mask_path,
+            case_id=case_id,
+            region=region,
+            settings_path=settings_path,
+            include_diagnostics=include_diagnostics,
+            software_version=software_version,
+        )
+    raise ValueError(f"Unsupported radiomics backend: {backend}")
+
+
+def _extract_pyradiomics_features(
+    image_path: str | Path,
+    mask_path: str | Path,
+    case_id: str,
+    region: str,
+    settings_path: str | Path | None,
+    include_diagnostics: bool,
+    software_version: str,
 ) -> pd.DataFrame:
     """Extract PyRadiomics features for one image/mask pair."""
     try:
@@ -57,6 +87,8 @@ def extract_radiomics_features(
 
 
 def _feature_group(name: str) -> str:
+    if ":" in name:
+        return name.split(":", maxsplit=1)[0].lower()
     parts = name.split("_")
     if len(parts) >= 2 and parts[0] in {"original", "wavelet", "logarithm", "gradient", "square"}:
         return parts[1]

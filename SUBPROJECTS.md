@@ -9,7 +9,7 @@ Primary workflow documentation lives in `README.md`.
 - `segmentation`: `subprojects/segmentation/`
 - `analysis`: `subprojects/analysis/`
 - `studies`: `subprojects/studies/`
-- `la_laa`: `subprojects/la_laa/`
+- `la_laa`: `subprojects/la_laa/` — LA/LAA substudy; includes the 3D Slicer **LAA Completion & SLAAO Annotation Assistant** (`subprojects/la_laa/slicer_module/`) with tested core, SOP (`docs/SOP.md`), and reproducibility metrics
 - `vertebral_manual`: `subprojects/vertebral_manual/`
 - `aorta_cta_radiomics`: `aorta_cta_radiomics/`
 - `cta-dental-opportunistic-screening`: `subprojects/cta-dental-opportunistic-screening/` — opportunistic dental analysis from head/neck CTA

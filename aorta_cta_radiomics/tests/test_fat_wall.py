@@ -250,10 +250,70 @@ def test_fat_closed_wall_can_use_input_aorta_as_lumen_floor_and_add_contrast():
         lumen_correction_close_radius_mm=0.0,
     )
 
-    assert result.contrast_lumen_mask[:, 5, 5].all()
-    assert not result.contrast_lumen_mask[:, 6:9, 9].any()
-    assert result.wall_candidate_mask[:, 6:9, 9].all()
+    assert result.contrast_lumen_mask[aorta].all()
+    assert result.contrast_lumen_mask[:, 6:9, 9].all()
+    assert not result.wall_candidate_mask[:, 6:9, 9].any()
     assert result.contrast_lumen_mask[:, 6:9, 10].all()
+
+
+def test_input_aorta_floor_never_shrinks_lumen_even_when_calcium_hu_is_excluded():
+    image = np.full((7, 15, 15), -1000.0, dtype=float)
+    aorta = np.zeros_like(image, dtype=bool)
+    aorta[:, 5:10, 5:10] = True
+    image[aorta] = 80.0
+    image[:, 6:9, 6:9] = 420.0
+    image[:, 6:9, 9] = 720.0
+
+    result = extract_fat_closed_aortic_wall(
+        image=image,
+        aorta_mask=aorta,
+        fat_mask=np.zeros_like(aorta),
+        spacing_xyz=(1.0, 1.0, 1.0),
+        case_id="CASE",
+        outer_limit_mm=5.0,
+        close_radius_mm=3.0,
+        lumen_core_distance_mm=1.0,
+        contrast_lower_margin_hu=100.0,
+        min_lumen_hu=300.0,
+        max_lumen_hu_above_reference=None,
+        exclude_calcification_hu=500.0,
+        include_calcification_in_wall=True,
+        use_input_aorta_as_lumen_floor=True,
+        lumen_correction_enabled=True,
+        lumen_correction_outer_mm=2.0,
+        lumen_correction_close_radius_mm=0.0,
+    )
+
+    assert result.contrast_lumen_mask[aorta].all()
+    assert np.count_nonzero(result.contrast_lumen_mask & ~aorta) == 0
+
+
+def test_extra_lumen_floor_mask_is_preserved_outside_cleaned_aorta():
+    image = np.full((7, 15, 15), -1000.0, dtype=float)
+    cleaned_aorta = np.zeros_like(image, dtype=bool)
+    cleaned_aorta[:, 5:10, 5:10] = True
+    raw_floor = cleaned_aorta.copy()
+    raw_floor[:, 4, 7] = True
+    image[raw_floor] = 420.0
+
+    result = extract_fat_closed_aortic_wall(
+        image=image,
+        aorta_mask=cleaned_aorta,
+        fat_mask=np.zeros_like(cleaned_aorta),
+        spacing_xyz=(1.0, 1.0, 1.0),
+        case_id="CASE",
+        outer_limit_mm=5.0,
+        close_radius_mm=3.0,
+        lumen_core_distance_mm=1.0,
+        contrast_lower_margin_hu=100.0,
+        min_lumen_hu=300.0,
+        max_lumen_hu_above_reference=None,
+        use_input_aorta_as_lumen_floor=True,
+        lumen_floor_mask=raw_floor,
+    )
+
+    assert result.contrast_lumen_mask[raw_floor].all()
+    assert result.contrast_lumen_mask[:, 4, 7].all()
 
 
 def test_fat_closed_wall_excludes_calcium_range_hu_from_lumen_but_keeps_wall():

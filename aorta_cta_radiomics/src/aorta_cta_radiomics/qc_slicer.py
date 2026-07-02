@@ -18,7 +18,7 @@ import pandas as pd
 
 
 ANATOMY_ALIASES: dict[str, list[str]] = {
-    "aorta": ["aorta", "aortic", "periaortic", "lumen_protrusion", "lumen_hu"],
+    "aorta": ["aorta", "aortic", "periaortic", "lumen_protrusion", "lumen_hu", "wall_thickness"],
     "carotid": ["carotid", "carotids", "cca", "ica"],
     "vertebral": ["vertebral", "vertebrals", "vert"],
     "artery": ["aorta", "aortic", "periaortic", "carotid", "vertebral", "artery", "arteries", "vessel"],
@@ -29,6 +29,7 @@ TASK_ALIASES: dict[str, list[str]] = {
     "calcification": ["calcification", "calcium", "calcified", "bone"],
     "adipose_tissue": ["adipose", "fat", "tissue"],
     "wall_from_fat": ["aortic_wall", "wall_from_fat", "fat_lumen", "contrast_lumen", "wall_lumen", "lumen_hu"],
+    "wall_thickness": ["wall_thickness", "thickness", "tee_analogue"],
     "lumen_protrusion": ["lumen_protrusion", "protrusion", "indentation"],
     "perivessel_wall_radiomics": ["wall", "perivessel", "peri", "shell", "radiomics"],
     "flow_dynamics": ["flow", "dynamics", "cfd", "wss"],
@@ -43,6 +44,7 @@ CATEGORY_COLORS: dict[str, tuple[float, float, float]] = {
     "flow": (0.0, 0.75, 1.0),
     "lumen": (0.0, 0.85, 1.0),
     "wall": (0.0, 0.75, 0.45),
+    "thickness": (1.0, 0.45, 0.0),
     "ulcer": (0.55, 0.0, 1.0),
     "protrusion": (0.78, 0.0, 0.2),
     "shape": (0.65, 0.35, 1.0),
@@ -801,11 +803,15 @@ def _include_output_mask_in_qc(path: Path) -> bool:
         return True
     if lower.endswith("_aortic_wall_contrast_lumen_from_centerline_hu.nii.gz"):
         return True
+    if lower.endswith("_wall_thickness_bins_labels.nii.gz"):
+        return True
+    if "_wall_thickness_gt_" in lower and lower.endswith("_tee_analogue_labels.nii.gz"):
+        return True
     if "_lumen_hu_label_" in lower and lower.endswith(".nii.gz"):
         return True
     if lower.endswith("_periaortic_fat_0_2mm.nii.gz") or lower.endswith("_periaortic_fat_2_5mm.nii.gz"):
         return True
-    if "lumen_protrusion" in lower and "_depth_ge_" in lower and lower.endswith("_labels_3d.nii.gz"):
+    if "wall_lumen_protrusion" in lower and "_depth_ge_" in lower and lower.endswith("_labels_3d.nii.gz"):
         return True
     return False
 
@@ -871,6 +877,8 @@ def infer_category(path: Path, anatomy: str, task: str) -> str:
         return "lumen"
     if "aortic_wall_candidate_from_fat_lumen" in lower:
         return "wall"
+    if "wall_thickness" in lower:
+        return "thickness"
     if any(token in lower for token in ["fat", "adipose"]):
         return "fat"
     if "outward_ulcer_like" in lower:
@@ -920,6 +928,11 @@ def _short_qc_label(stem: str) -> str:
         return "Aorta HU"
     if stem == "aortic_wall_candidate_from_fat_lumen":
         return "Wall"
+    if stem == "wall_thickness_bins_labels":
+        return "Wall bins"
+    if stem.startswith("wall_thickness_gt_") and stem.endswith("_TEE_analogue_labels"):
+        threshold = stem.removeprefix("wall_thickness_gt_").removesuffix("mm_TEE_analogue_labels").replace("p", ".")
+        return f"Wall >{threshold}"
     if stem == "periaortic_fat_0_2mm":
         return "Fat 0-2"
     if stem == "periaortic_fat_2_5mm":

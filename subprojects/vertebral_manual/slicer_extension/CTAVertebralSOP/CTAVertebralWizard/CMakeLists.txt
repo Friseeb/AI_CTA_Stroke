@@ -2,6 +2,7 @@ set(MODULE_NAME CTAVertebralWizard)
 
 set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
+  vertebral_review_core.py
 )
 
 set(MODULE_PYTHON_RESOURCES

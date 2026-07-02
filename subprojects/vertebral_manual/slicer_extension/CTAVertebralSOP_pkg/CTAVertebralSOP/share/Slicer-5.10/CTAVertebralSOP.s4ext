@@ -7,6 +7,9 @@ scmurl https://github.com/Friseeb/AI_CTA_Stroke
 scmrevision main
 homepage https://github.com/Friseeb/AI_CTA_Stroke
 category Cardiac
-description CTA Vertebral SOP tools: guided segmentation wizard and finalize/save utility.
+iconurl
+status
+description CTA Vertebral SOP tools: queue-based guided bilateral review, foramen negative-prior QC, and finalize/save utility.
 contributors Sebastian Fridman (NYU)
 depends
+build_type

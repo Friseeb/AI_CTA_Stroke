@@ -4,6 +4,16 @@ The list is grouped by likely impact on downstream associations. None of
 these block v1 use on a cohort, but each should be addressed before any
 publication-grade analysis.
 
+## v2 upgrade summary (this release)
+
+The pipeline now ships a metric registry, an explicit landmark schema with
+provider chain, dedicated tongue / mandible / soft-tissue / skeletal modules,
+regional airway + fat features, exploratory composites, and an expanded
+radiomics ROI list. See [CT_OSA_METRICS.md](CT_OSA_METRICS.md) for the
+family overview and the per-family docs for the geometry contracts.
+
+Open items below are unchanged unless tagged **(updated)**.
+
 ## Airway
 
 - **Centerline-orthogonal CSA.** v1 reports axial CSA only
@@ -12,12 +22,13 @@ publication-grade analysis.
   + orthogonal cross-sections pass would change `airway_min_csa_mm2` and
   the percentile features. The toggle exists (`airway.centerline_orthogonal_csa`)
   but is not yet wired.
-- **Landmark detection.** Without dental-provided landmarks, all
-  retropalatal / retroglossal / retrolingual outputs are NaN. A light CTA-only
-  landmark detector (PNS, hyoid, mandibular plane) would unblock the
-  region-specific columns even when the dental pipeline isn't available.
-  AirwayNet-MM-H weights are not assumed to be on disk; a heuristic
-  (cervical-vertebrae anchor) is a reasonable starting point.
+- **Landmark detection.** **(updated)** v2 introduces a four-provider chain
+  (`build_landmark_bundle`): explicit JSON → dental adapter → conservative
+  heuristic from the airway → empty bundle. The heuristic only fires when the
+  airway is tall enough and only populates `retroglossal_level`,
+  `tongue_base_level`, and `hard_palate_plane`. A real PNS / hyoid /
+  mandibular-plane detector would still unblock the rest; AirwayNet-MM-H or
+  cervical-vertebrae anchors remain candidate sources.
 - **Length vs vertical extent.** `airway_length_mm` is currently
   `n_nonzero_z_slices × dz`. For a curved airway this under-estimates true
   length. Should switch to centerline arc length when (1) is done.
@@ -45,21 +56,27 @@ publication-grade analysis.
   patients without a clear narrowing this picks the slice with the smallest
   measurement noise (i.e. mid-pharynx). Should additionally anchor at the
   PNS-to-hyoid midpoint when landmarks exist.
-- **Tongue surrogate.** v1 ROI is a coarse anterior-to-airway slab. It
-  contaminates with floor-of-mouth musculature. Either skip the column for
-  v1 publications or wait for a tongue segmenter.
+- **Tongue surrogate.** **(updated)** v2 separates the global tongue mask
+  path from the landmark-only fallback. The fallback is opt-in
+  (`allow_posterior_roi_fallback`) and is always flagged
+  `tongue_roi_confidence='low'`. Floor-of-mouth contamination remains a
+  concern for the fallback box but the column is clearly distinguished from
+  the mask-driven posterior tongue ROI. A proper tongue segmenter (e.g. a
+  TotalSegmentator extension) is still the right long-term answer.
 
 ## Composite scores
 
-- **Cohort standardization.** `cta_osa_*_score_untrained` are deliberately
-  raw values. For comparable scores across cohorts we need at minimum
-  age/sex/BMI z-scoring against a reference distribution. The
-  `merge-clinical` step now produces the needed data; a downstream notebook
-  should be added to compute the standardized score.
-- **Score weighting.** The combined score is a flat sum. A weighted
-  combination (e.g. logistic-regression coefficients from a validation
-  cohort) would be more useful but is left out of v1 to avoid claiming
-  predictive validity.
+- **Cohort standardization.** **(updated)** v2 composites are off by default
+  and, when enabled, require `cohort_stats` (per-feature mean + std) to emit
+  z-scored values. Raw `composite_score_method='raw_linear_unstandardized_v2'`
+  remains available for ablation but should not be used for cross-cohort
+  comparison. Component direction signs are explicit in `COMPONENT_DIRECTIONS`
+  (test-enforced) so flipped contributions cannot silently default to +1.
+- **Score weighting.** The combined score is still an unweighted average of
+  the four sub-composites. A weighted combination (e.g. logistic-regression
+  coefficients from a validation cohort) would be more useful but is left
+  out of this release to avoid claiming predictive validity. The composite
+  disclaimer column makes the un-validated status visible in every row.
 
 ## Calibration & validation
 

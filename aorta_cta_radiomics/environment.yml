@@ -14,6 +14,7 @@ dependencies:
   - typer
   - tqdm
   - matplotlib
+  - seaborn
   - pytest
   - pip
   - pip:
@@ -24,8 +25,5 @@ dependencies:
 # Optional, install only when needed:
 #   conda install -c conda-forge pyvista trimesh
 #   pip install monai torch
-#   pip install -e ".[encoders]"
-#   pip install -e ".[ct-fm]"
-#   pip install -e ".[all-encoders]"
 # On macOS, if torch reports duplicate OpenMP runtimes:
 #   export KMP_DUPLICATE_LIB_OK=TRUE

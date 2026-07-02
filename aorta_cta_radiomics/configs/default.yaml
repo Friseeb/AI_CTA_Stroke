@@ -2,6 +2,9 @@ image:
   assume_hu: true
   resample_mask_if_needed: true
 
+compute:
+  crop_margin_mm: 8
+
 mask_cleaning:
   keep_largest_component: true
   fill_holes: true
@@ -48,18 +51,6 @@ geometry:
   enabled: true
   min_slice_voxels: 20
   max_branch_link_distance_mm: 20
-  max_components_per_slice: 4
-
-wall_morphology:
-  enabled: true
-  min_slice_voxels: 80
-  axial_step_mm: 2
-  angular_bins: 24
-  smoothing_bins: 9
-  candidate_depth_mm: 4
-  candidate_neighborhood_mm: 2
-  candidate_focal_radius_mm: 1
-  wall_parcel_radius_mm: 1.25
   max_components_per_slice: 4
 
 lumen_protrusions:
@@ -142,6 +133,8 @@ wall_from_fat:
 
 radiomics:
   enabled: true
+  backend: pyradiomics
+  device: cpu
   settings_path: configs/radiomics.yaml
   regions:
     - aorta_mask
@@ -152,23 +145,6 @@ radiomics:
     - shell_5_10mm
     - shell_calcification_local
   include_diagnostics: false
-
-encoders:
-  enabled: false
-  device: auto
-  patch_sources:
-    - calcification_500HU
-  max_patches_per_source: 64
-  patch_size_mm_zyx: [12, 32, 32]
-  backends:
-    - name: tap_ct
-      backend: tap_ct_hf
-      model_name: fomofo/tap-ct-b-3d
-      trust_remote_code: true
-      target_shape_zyx: [12, 224, 224]
-      hu_clip: [-1008, 822]
-      normalization_mean: -86.8086
-      normalization_std: 322.6347
 
 outputs:
   save_masks: true

@@ -5,8 +5,9 @@ volume (so the volume → mL conversion is testable), drop in a contrived
 posterior third (for HU stats), and exercise the two fallback paths:
 
   * mask present, no landmarks  → global volume + posterior third works
-  * no mask, landmarks + airway → landmark posterior box works
-  * no mask, no landmarks       → every tongue feature missing, qc_pass False
+  * no mask, landmarks + airway + explicit fallback → landmark posterior box works
+  * no mask, airway only + explicit fallback        → min-CSA posterior box works
+  * no mask, no airway          → every tongue feature missing, qc_pass False
 
 We also verify the tongue/mandible and tongue/oral-cavity volume ratios
 when the caller passes in those volumes.
@@ -89,8 +90,16 @@ def test_missing_mask_and_no_fallback_returns_failure(synth_cta):
     assert math.isnan(out["tongue_volume_ml"])
 
 
-def test_missing_mask_and_no_landmarks_failure(synth_cta):
+def test_missing_mask_default_does_not_create_fallback_roi(synth_cta):
     cfg = TongueConfig()
+    out = compute_tongue_features(synth_cta, cfg, None, _bundle_with_levels())
+    assert out["tongue_mask_available"] is False
+    assert out["tongue_qc_failure_reasons"] == "no_tongue_mask_and_fallback_disabled"
+    assert out["tongue_posterior_roi_available"] is False
+
+
+def test_missing_mask_and_no_landmarks_failure_when_fallback_enabled(synth_cta):
+    cfg = TongueConfig(allow_posterior_roi_fallback=True)
     out = compute_tongue_features(synth_cta, cfg, None, LandmarkBundle())
     # No airway either → no anchor → failure
     assert out["tongue_mask_available"] is False
@@ -249,6 +258,46 @@ def test_landmark_posterior_box_without_airway_returns_none(synth_cta):
     assert method == "no_anchor"
 
 
+def test_posterior_box_with_airway_only_uses_min_csa_anchor(synth_cta):
+    tube = _tube_mask()
+    # Make one slice visibly narrow so the fallback has a deterministic anchor.
+    tube[44] = False
+    yy, xx = np.ogrid[:80, :80]
+    tube[44] = ((yy - 50) ** 2 + (xx - 40) ** 2) <= 4
+    airway = AirwayMaskInfo(mask_zyx=tube, method="external_mask",
+                            confidence="medium", notes="")
+    box, method, confidence = _landmark_posterior_tongue_box(
+        synth_cta, LandmarkBundle(), airway,
+    )
+    assert box is not None
+    assert box.any()
+    assert confidence == "low"
+    assert "airway_min_csa_box" in method
+    assert "z=44" in method
+
+
+def test_airway_only_fallback_populates_posterior_hu_stats(synth_cta):
+    tube = _tube_mask()
+    airway = AirwayMaskInfo(mask_zyx=tube, method="external_mask",
+                            confidence="medium", notes="")
+    saved = {}
+
+    def cb(name: str, arr: np.ndarray) -> None:
+        saved[name] = int(arr.sum())
+
+    out = compute_tongue_features(
+        synth_cta, TongueConfig(allow_posterior_roi_fallback=True),
+        None, LandmarkBundle(),
+        airway=airway, save_masks_callback=cb,
+    )
+    assert out["tongue_mask_available"] is False
+    assert out["tongue_posterior_roi_available"] is True
+    assert out["tongue_roi_confidence"] == "low"
+    assert out["tongue_posterior_volume_ml"] > 0
+    assert out["tongue_qc_pass"] is True
+    assert saved["tongue_posterior"] > 0
+
+
 def test_fallback_path_populates_posterior_hu_stats(synth_cta):
     """No tongue mask, but airway + landmarks → landmark posterior box gives
     HU stats and qc_pass = True (because no failure reasons accumulated)."""
@@ -256,7 +305,7 @@ def test_fallback_path_populates_posterior_hu_stats(synth_cta):
     airway = AirwayMaskInfo(mask_zyx=tube, method="external_mask",
                             confidence="medium", notes="")
     bundle = _bundle_with_levels(rg_z=40, base_z=45)
-    cfg = TongueConfig()
+    cfg = TongueConfig(allow_posterior_roi_fallback=True)
     out = compute_tongue_features(synth_cta, cfg, None, bundle, airway=airway)
     assert out["tongue_mask_available"] is False
     assert out["tongue_posterior_roi_available"] is True

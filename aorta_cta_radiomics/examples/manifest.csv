@@ -1,3 +1,3 @@
-case_id,image_path,aorta_mask_path,optional_notes
-CASE001,data/raw/CASE001_cta.nii.gz,data/masks/CASE001_aorta.nii.gz,example TotalSegmentator aorta mask
-CASE002,data/raw/CASE002_cta.nii.gz,data/masks/CASE002_aorta_corrected.nii.gz,manual correction from 3D Slicer
+case_id,image_path,aorta_mask_path,metadata_path,optional_notes
+CASE001,data/raw/CASE001_cta.nii.gz,data/masks/CASE001_aorta.nii.gz,data/raw/CASE001_cta.json,example VISTA or TotalSegmentator aorta mask
+CASE002,data/raw/CASE002_cta.nii.gz,data/masks/CASE002_aorta_corrected.nii.gz,data/raw/CASE002_cta.json,manual correction from 3D Slicer

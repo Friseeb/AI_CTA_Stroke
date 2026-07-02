@@ -1,4 +1,4 @@
-# Script Setup (Golden Path)
+ Script Setup (Golden Path)
 
 This is the recommended, minimal script set for routine use.
 

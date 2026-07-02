@@ -14,6 +14,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "assume_hu": True,
         "resample_mask_if_needed": True,
     },
+    "compute": {
+        "crop_margin_mm": 8.0,
+    },
     "mask_cleaning": {
         "keep_largest_component": True,
         "fill_holes": True,
@@ -56,18 +59,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": True,
         "min_slice_voxels": 20,
         "max_branch_link_distance_mm": 20.0,
-        "max_components_per_slice": 4,
-    },
-    "wall_morphology": {
-        "enabled": True,
-        "min_slice_voxels": 80,
-        "axial_step_mm": 2.0,
-        "angular_bins": 24,
-        "smoothing_bins": 9,
-        "candidate_depth_mm": 4.0,
-        "candidate_neighborhood_mm": 2.0,
-        "candidate_focal_radius_mm": 1.0,
-        "wall_parcel_radius_mm": 1.25,
         "max_components_per_slice": 4,
     },
     "lumen_protrusions": {
@@ -177,28 +168,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "radiomics": {
         "enabled": True,
+        "backend": "pyradiomics",
+        "device": "cpu",
         "settings_path": "configs/radiomics.yaml",
         "regions": ["aorta_mask", "aorta_wall_band", "periaortic_fat", "shell_0_2mm", "shell_2_5mm", "shell_5_10mm"],
         "include_diagnostics": False,
-    },
-    "encoders": {
-        "enabled": False,
-        "device": "auto",
-        "patch_sources": ["calcification_500HU"],
-        "max_patches_per_source": 64,
-        "patch_size_mm_zyx": [12, 32, 32],
-        "backends": [
-            {
-                "name": "tap_ct",
-                "backend": "tap_ct_hf",
-                "model_name": "fomofo/tap-ct-b-3d",
-                "trust_remote_code": True,
-                "target_shape_zyx": [12, 224, 224],
-                "hu_clip": [-1008, 822],
-                "normalization_mean": -86.8086,
-                "normalization_std": 322.6347,
-            }
-        ],
     },
     "outputs": {
         "save_masks": True,

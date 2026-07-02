@@ -46,3 +46,14 @@ tmp_*
 
 # Vendored ADN clone + pretrained weights (MAR POC; not tracked)
 external/adn/
+
+# Local Claude Code settings (personal, per-machine)
+.claude/
+# Vendored external tools / downloaded model weights & datasets (managed on main
+# or downloaded locally; not committed from this working tree)
+external/nv_segment_ct/
+external/CTA-DEFACE/
+external/cardiac_ct_explorer/
+external/public_cardiac_ct_dataset/
+external/topcow_claim/
+external/topcow_weights/

@@ -17,6 +17,36 @@ framework for thrombus-inclusive segmentation.
 
 ---
 
+## Phase 0 — Annotation Assistant & Pilot (Implemented)
+
+The annotator-facing **LAA Completion & SLAAO Annotation Assistant** recovers the
+*complete* LAA (including the distal hypoattenuated / SLAAO Type 1 region that
+VISTA-3D / TotalSegmentator / NUDF truncate), supports human correction with
+positive/negative prompts and optional MONAILabel, and captures reproducible
+pilot + interobserver-reproducibility metrics. Pilot-first: establish the SOP,
+feasibility, timing, and reproducibility before any model fine-tuning.
+
+- 3D Slicer module + tested core: `slicer_module/` (see its `README.md`).
+- Annotation SOP, label contract, rating scales, pilot/repro modes: `docs/SOP.md`.
+- Reproducibility metrics (Dice / Surface Dice / HD95): `scripts/run_laa_reproducibility.py`.
+
+Label contract `laa_completion_v1`: `1` = Whole LAA (primary), `2` = SLAAO Type 1
+region (geometric, nested, may be empty), `3` LA body, `4` pulmonary veins,
+`5` coronary artery, `6` aorta/PA, `7` other hard-negative.
+
+Per-case output tree:
+
+```text
+<case_dir>/laa_annotation/[<reader_id>/]
+  candidate_masks/  manual_masks/  type1_masks/
+  iterations/       logs/          screenshots/  metrics/
+```
+
+These segmentation masks + pilot metrics are **complementary** to the Phase-1
+`SLAAO_labels.json` filling-state booleans below; both are retained.
+
+---
+
 ## Phase 1 (Implemented)
 
 ### Prior fusion

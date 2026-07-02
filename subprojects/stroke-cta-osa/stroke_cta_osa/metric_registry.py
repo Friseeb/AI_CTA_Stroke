@@ -667,6 +667,45 @@ def _build_registry() -> tuple[MetricSpec, ...]:
     R.append(_hu("fat_deep_cervical_mean_hu", "fat_deep"))
     R.append(_ratio("fat_deep_to_subcutaneous_ratio", "fat_deep"))
 
+    # Anatomically-constrained neck slab (FOV-robust cervical adiposity).
+    # A fixed-height slab anchored on the airway min-CSA slice, plus dimensionless
+    # fractions/ratios that do not scale with the imaged z-extent — these fix the
+    # plain cervical-volume inflation on tall head-to-chest CTAs.
+    R.append(_str("fat_neck_anchor_method", "fat_cervical",
+                  method="min_csa | cervical_zrange | unavailable_no_anchor"))
+    R.append(_mm("fat_neck_roi_radius_mm", "fat_cervical",
+                 method="in-plane containment radius around the airway centroid"))
+    R.append(_mm("fat_neck_slab_height_mm", "fat_cervical", tier=Tier.TIER1,
+                 method="physical height of the anchored neck slab"))
+    R.append(_ml("fat_neck_slab_volume_ml", "fat_cervical", tier=Tier.TIER1,
+                 cta_specific=True,
+                 method="fat within a fixed ±slab_mm window around the airway "
+                        "min-CSA slice ∩ body ∩ fat-HU (FOV-robust)"))
+    R.append(_ml("fat_neck_slab_subcutaneous_volume_ml", "fat_cervical",
+                 tier=Tier.TIER1, cta_specific=True))
+    R.append(_ml("fat_neck_slab_deep_volume_ml", "fat_cervical", tier=Tier.TIER1,
+                 cta_specific=True))
+    R.append(_hu("fat_neck_slab_mean_hu", "fat_cervical", contrast_sensitive=True))
+    R.append(_frac("fat_neck_slab_fat_fraction", "fat_cervical", tier=Tier.TIER1,
+                   method="slab fat voxels / slab body voxels (dimensionless, FOV-invariant)"))
+    R.append(_ratio("fat_neck_slab_deep_to_subcutaneous_ratio", "fat_cervical",
+                    tier=Tier.TIER1))
+    R.append(_ratio("fat_neck_slab_to_airway_volume_ratio", "fat_cervical",
+                    tier=Tier.TIER1, method="slab fat volume / airway volume"))
+    R.append(_mm2("fat_neck_area_at_min_csa_mm2", "fat_cervical", tier=Tier.TIER1,
+                  method="cervical fat area on the airway min-CSA slice"))
+    R.append(_mm2("fat_neck_body_area_at_min_csa_mm2", "fat_cervical",
+                  tier=Tier.TIER1, method="neck (body) area on the min-CSA slice"))
+    R.append(_frac("fat_neck_area_fraction_at_min_csa", "fat_cervical",
+                   tier=Tier.TIER1,
+                   method="fat area / neck area at min-CSA slice (dimensionless)"))
+    R.append(_ml("fat_deep_peripharyngeal_volume_ml", "fat_deep_peripharyngeal",
+                 tier=Tier.TIER1, cta_specific=True,
+                 method="Deep cervical fat within a physical-distance band around the airway"))
+    R.append(_hu("fat_deep_peripharyngeal_mean_hu", "fat_deep_peripharyngeal"))
+    R.append(_str("fat_deep_peripharyngeal_roi_method",
+                  "fat_deep_peripharyngeal"))
+
     # Parapharyngeal
     for side in ("left", "right", "total"):
         R.append(_ml(f"fat_parapharyngeal_{side}_volume_ml",
@@ -691,6 +730,10 @@ def _build_registry() -> tuple[MetricSpec, ...]:
     R.append(_mm2("fat_parapharyngeal_area_at_min_airway_csa_mm2",
                   "fat_parapharyngeal"))
     R.append(_str("fat_parapharyngeal_roi_method", "fat_parapharyngeal"))
+    R.append(_str("fat_anatomy_prior_masks_used", "fat"))
+    R.append(_str("fat_regional_anatomy_prior_masks_used", "fat"))
+    R.append(_str("fat_regional_parapharyngeal_roi_method",
+                  "fat_parapharyngeal"))
 
     # Retropharyngeal
     R.append(_ml("fat_retropharyngeal_volume_ml", "fat_retropharyngeal",
@@ -713,6 +756,24 @@ def _build_registry() -> tuple[MetricSpec, ...]:
                  tier=Tier.TIER2, maturity=Maturity.HEURISTIC))
     R.append(_ratio("fat_facial_to_parapharyngeal_ratio", "fat_facial",
                     tier=Tier.TIER2))
+
+    # ----- Evidence-aware method + confidence fields -----
+    # These describe HOW each feature family was produced and a coarse
+    # confidence label (high|moderate|low|missing). They are referenced by
+    # evidence_registry.EvidenceSpec.confidence_field_name. Adding them as
+    # stable string columns lets downstream analysis filter by provenance.
+    for n in (
+        "tongue_confidence",
+        "fat_cervical_method", "fat_cervical_confidence",
+        "fat_parapharyngeal_method", "fat_parapharyngeal_confidence",
+        "fat_retropharyngeal_method", "fat_retropharyngeal_confidence",
+        "fat_submandibular_method", "fat_submandibular_confidence",
+        "fat_periairway_method", "fat_periairway_confidence",
+        "fat_c5_nat_method", "fat_c5_nat_confidence",
+        "fat_pericarotid_method", "fat_pericarotid_confidence",
+    ):
+        R.append(_str(n, region="fat" if n.startswith("fat_") else "tongue",
+                      method="provenance/confidence label: high|moderate|low|missing"))
 
     # ----- Composites (exploratory) -----
     for n in (

@@ -21,7 +21,7 @@ from .config import PipelineConfig
 from .dicom_utils import safe_hash
 from .fat import compute_fat_features
 from .fat_regions import FatRegionConfig as _FatRegionCfg, compute_regional_fat_features
-from .io import load_input, save_mask
+from .io import load_input, save_mask, to_sitk_image
 from .landmarks import build_landmark_bundle
 from .logging_utils import get_logger
 from .mandible import (
@@ -139,14 +139,55 @@ def extract_case(
     else:
         anchor_z = None
 
+    # Optional anatomy masks from TotalSegmentator/VISTA/manual/dental outputs.
+    # These are consumed by the anatomy modules and by fat ROI priors.
+    tongue_mask = _load_external_mask_array(
+        external_tongue_mask_path or cfg.tongue.external_mask_path, image)
+    mandible_mask_method = "external_mask"
+    mandible_mask = _load_external_mask_array(
+        external_mandible_mask_path or cfg.mandible.external_mask_path, image)
+    if (mandible_mask is None or not mandible_mask.any()) \
+            and cfg.mandible.dental_mandible_mask_path:
+        mandible_mask = _load_external_mask_array(
+            cfg.mandible.dental_mandible_mask_path, image)
+        mandible_mask_method = "dental_mandible_mask"
+    oral_cavity_mask = _load_external_mask_array(
+        external_oral_cavity_mask_path or cfg.oral_cavity.external_mask_path, image)
+    soft_palate_mask = _load_external_mask_array(
+        external_soft_palate_mask_path or cfg.soft_tissue.soft_palate_mask_path,
+        image)
+    uvula_mask = _load_external_mask_array(cfg.soft_tissue.uvula_mask_path, image)
+    tonsil_l = _load_external_mask_array(
+        cfg.soft_tissue.palatine_tonsil_left_mask_path, image)
+    tonsil_r = _load_external_mask_array(
+        cfg.soft_tissue.palatine_tonsil_right_mask_path, image)
+    prevertebral_mask = _load_external_mask_union(
+        cfg.fat.prevertebral_mask_paths, image)
+    anatomy_masks = {
+        "tongue": tongue_mask,
+        "mandible": mandible_mask,
+        "oral_cavity": oral_cavity_mask,
+        "soft_palate": soft_palate_mask,
+        "uvula": uvula_mask,
+        "palatine_tonsil_left": tonsil_l,
+        "palatine_tonsil_right": tonsil_r,
+        "prevertebral": prevertebral_mask,
+    }
+
     # 6. Fat features
+    # Only retain full-volume masks for radiomics when radiomics is actually
+    # enabled — otherwise these bool volumes stay resident for nothing and
+    # inflate the per-case memory peak (which gates batch worker count).
     masks_for_radiomics: dict[str, np.ndarray] = {}
+    _keep_radiomics_masks = cfg.radiomics.enabled
     def _save_mask(name: str, mask: np.ndarray) -> None:
         if cfg.output.save_masks:
             try:
                 save_mask(mask, image, case_dir / f"mask_{name}.nii.gz")
             except Exception as exc:
                 log.warning("Could not save mask %s: %s", name, exc)
+        if not _keep_radiomics_masks:
+            return
         if name in ("fat_cervical_total", "fat_parapharyngeal_total"):
             masks_for_radiomics[name.replace("fat_", "").replace("_total", "")] = mask
         if name == "fat_parapharyngeal_total":
@@ -154,11 +195,22 @@ def extract_case(
         if name == "fat_cervical_total":
             masks_for_radiomics["cervical_fat"] = mask
 
+    if prevertebral_mask is not None and prevertebral_mask.any():
+        _save_mask("prevertebral", prevertebral_mask)
+
+    # Compute the body silhouette ONCE and share it across the fat, regional-fat
+    # and soft-palate modules. It's a full-volume connected-component pass — the
+    # single most expensive op after airway — so reusing it both speeds the case
+    # and removes a large duplicate memory spike (previously body_mask ran twice).
+    body_silhouette = body_mask(image, cfg.fat.body_air_threshold_hu)
+
     fat_features = compute_fat_features(
         image=image, airway=airway_info, landmarks=landmarks,
         hu_cfg=cfg.hu, fat_cfg=cfg.fat,
         airway_min_csa_z_index=anchor_z,
         save_masks_callback=_save_mask,
+        anatomy_masks=anatomy_masks,
+        precomputed_body_mask=body_silhouette,
     )
 
     # Save airway mask for radiomics too
@@ -204,37 +256,6 @@ def extract_case(
             )
     _save_mask = _save_mask_v2  # noqa: F841 — keep symbol name to reduce diff
 
-    def _load_external_mask(path: Optional[Path | str]) -> Optional[np.ndarray]:
-        if path is None:
-            return None
-        p = Path(path)
-        if not p.is_file():
-            log.warning("External mask not found: %s", p)
-            return None
-        try:
-            import SimpleITK as sitk
-            m = sitk.GetArrayFromImage(sitk.ReadImage(str(p))).astype(bool)
-            if m.shape != image.shape_zyx:
-                log.warning("External mask shape %s != image %s — skipping",
-                            m.shape, image.shape_zyx)
-                return None
-            return m
-        except Exception as exc:
-            log.warning("Could not load external mask %s: %s", p, exc)
-            return None
-
-    tongue_mask = _load_external_mask(external_tongue_mask_path
-                                       or cfg.tongue.external_mask_path)
-    mandible_mask = _load_external_mask(external_mandible_mask_path
-                                         or cfg.mandible.external_mask_path)
-    oral_cavity_mask = _load_external_mask(external_oral_cavity_mask_path
-                                            or cfg.oral_cavity.external_mask_path)
-    soft_palate_mask = _load_external_mask(external_soft_palate_mask_path
-                                            or cfg.soft_tissue.soft_palate_mask_path)
-    uvula_mask = _load_external_mask(cfg.soft_tissue.uvula_mask_path)
-    tonsil_l = _load_external_mask(cfg.soft_tissue.palatine_tonsil_left_mask_path)
-    tonsil_r = _load_external_mask(cfg.soft_tissue.palatine_tonsil_right_mask_path)
-
     # 6.2 Mandible (provides volume needed by tongue ratios)
     mandible_features = compute_mandible_features(
         image=image,
@@ -246,6 +267,7 @@ def extract_case(
             bone_min_volume_ml=cfg.mandible.bone_min_volume_ml,
         ),
         mandible_mask=mandible_mask,
+        mandible_mask_method=mandible_mask_method,
         landmarks=landmarks_bundle,
         oral_cavity_mask=oral_cavity_mask,
         oral_cavity_cfg=_OralCfg(enabled=cfg.oral_cavity.enabled),
@@ -280,8 +302,10 @@ def extract_case(
     if isinstance(tongue_volume_ml, float) and tongue_volume_ml != tongue_volume_ml:
         tongue_volume_ml = None
 
-    # 6.4 Body silhouette for soft palate + regional fat (compute once)
-    body_arr = body_mask(image, cfg.fat.body_air_threshold_hu) \
+    # 6.4 Body silhouette for soft palate + regional fat. Reuse the one already
+    # computed above; preserve the prior contract of None when no airway is
+    # present (downstream soft-palate / regional-fat / QC depend on that).
+    body_arr = body_silhouette \
         if airway_info is not None and airway_info.is_present else None
 
     # 6.5 Soft palate / Uvula / Lateral wall / Tonsils
@@ -352,12 +376,19 @@ def extract_case(
             retropharyngeal_posterior_band_mm=cfg.fat.retropharyngeal_posterior_band_mm,
             retropharyngeal_axial_window_mm=cfg.fat.retropharyngeal_axial_window_mm,
             body_air_threshold_hu=cfg.fat.body_air_threshold_hu,
+            subcutaneous_erosion_mm=cfg.fat.subcutaneous_erosion_mm,
             enable_facial_fat=cfg.fat_regions.enable_facial_fat,
+            use_anatomy_priors=cfg.fat.use_anatomy_priors,
+            anatomy_prior_dilation_mm=cfg.fat.anatomy_prior_dilation_mm,
+            parapharyngeal_sector_min_lateral_fraction=(
+                cfg.fat.parapharyngeal_sector_min_lateral_fraction
+            ),
         ),
         airway=airway_info,
         body_mask=body_arr,
         landmarks=landmarks_bundle,
         save_masks_callback=_save_mask,
+        anatomy_masks=anatomy_masks,
     )
 
     # 7. Optional modules
@@ -464,6 +495,57 @@ def extract_case(
 
 # --- helpers ----------------------------------------------------------------
 
+def _load_external_mask_array(
+    path: Optional[Path | str],
+    image: CTAImage,
+) -> Optional[np.ndarray]:
+    """Load an optional binary mask and resample it to the CTA geometry."""
+    if path is None:
+        return None
+    p = Path(path)
+    if not p.is_file():
+        log.warning("External mask not found: %s", p)
+        return None
+    try:
+        import SimpleITK as sitk
+        mask_img = sitk.ReadImage(str(p))
+        if not _sitk_geometry_matches(mask_img, image):
+            mask_img = sitk.Resample(
+                mask_img,
+                to_sitk_image(image),
+                sitk.Transform(),
+                sitk.sitkNearestNeighbor,
+                0,
+                mask_img.GetPixelID(),
+            )
+        mask = sitk.GetArrayFromImage(mask_img).astype(bool)
+        if mask.shape != image.shape_zyx:
+            log.warning("External mask resampled shape %s != image %s - skipping",
+                        mask.shape, image.shape_zyx)
+            return None
+        return mask
+    except Exception as exc:
+        log.warning("Could not load external mask %s: %s", p, exc)
+        return None
+
+
+def _load_external_mask_union(
+    paths: list[str],
+    image: CTAImage,
+) -> Optional[np.ndarray]:
+    """Load and union multiple optional masks in CTA geometry."""
+    masks = [
+        m for p in paths
+        if (m := _load_external_mask_array(p, image)) is not None and m.any()
+    ]
+    if not masks:
+        return None
+    out = np.zeros(image.shape_zyx, dtype=bool)
+    for mask in masks:
+        out |= mask
+    return out
+
+
 def _load_cohort_stats(path: Optional[str]) -> Optional[CohortStats]:
     """Read a 3-column CSV (feature_name, mean, std) into a CohortStats.
 
@@ -493,6 +575,23 @@ def _load_cohort_stats(path: Optional[str]) -> Optional[CohortStats]:
     except Exception as exc:
         log.warning("Could not parse cohort stats CSV %s: %s", p, exc)
         return None
+
+
+def _sitk_geometry_matches(mask_img: object, image: CTAImage) -> bool:
+    """True when an optional mask is already in the consuming CTA geometry."""
+    try:
+        size = tuple(int(v) for v in mask_img.GetSize())
+        spacing = tuple(float(v) for v in mask_img.GetSpacing())
+        origin = tuple(float(v) for v in mask_img.GetOrigin())
+        direction = tuple(float(v) for v in mask_img.GetDirection())
+    except AttributeError:
+        return False
+    return (
+        size == tuple(reversed(image.shape_zyx))
+        and np.allclose(spacing, image.spacing_xyz_mm, atol=1e-4)
+        and np.allclose(origin, image.origin_xyz_mm, atol=1e-3)
+        and np.allclose(direction, image.direction_3x3, atol=1e-5)
+    )
 
 
 def _composite_scores(airway: dict, fat: dict) -> dict:

@@ -13,6 +13,31 @@ Research pipeline that extracts CTA-derived **upper-airway and cervical/paraphar
 > (AHI / ODI / T90 / min-SpO₂) and stroke outcomes. Every output is flagged as
 > research / experimental.
 
+## Evidence-tiered features
+
+Every feature is separated by **strength of prior OSA imaging evidence** so the
+primary phenotype is never contaminated by exploratory features:
+
+| Tier | Feature set | Use |
+|---|---|---|
+| Tier 1 — core OSA-backed | `core_osa_backed` | primary CTA-OSA phenotype |
+| Tier 2 — OSA-plausible CT anatomy | `core_plus_anatomic_extensions` | secondary / mechanistic |
+| Tier 3 — CT cardiometabolic/vascular | `core_plus_cardiometabolic_ct` | stroke / MACE / AF / AFDAS risk |
+| Tier 4 — novel stroke-CTA | `all_features_exploratory` | exploratory only |
+
+```bash
+stroke-cta-osa list-features --feature-set core_osa_backed --out core_dict.csv
+stroke-cta-osa extract case.nii.gz --out out/ --feature-set core_osa_backed
+stroke-cta-osa summarize out/features.csv --by-evidence-tier
+```
+
+See the full evidence-based guide and reference table in
+**[docs/stroke_cta_osa/README.md](../../docs/stroke_cta_osa/README.md)** and
+[EVIDENCE_TIERS.md](../../docs/stroke_cta_osa/EVIDENCE_TIERS.md) ·
+[FEATURE_SETS.md](../../docs/stroke_cta_osa/FEATURE_SETS.md) ·
+[FAT_COMPARTMENTS.md](../../docs/stroke_cta_osa/FAT_COMPARTMENTS.md) ·
+[ANALYSIS_PLAN.md](../../docs/stroke_cta_osa/ANALYSIS_PLAN.md).
+
 ## Quick start
 
 ```bash
@@ -26,6 +51,19 @@ stroke-cta-osa extract /path/to/cta.nii.gz --out outputs/run01 --patient-id sub-
 stroke-cta-osa extract /path/to/cta.nii.gz --out outputs/run01 \
     --dental-mask /dental/runs/sub-001/airway.nii.gz \
     --dental-landmarks /dental/runs/sub-001/landmarks.json
+
+# reuse the dental pipeline jawbone as the OSA mandible mask
+stroke-cta-osa extract /path/to/cta.nii.gz --out outputs/run01 \
+    --dental-mandible-mask /dental/runs/sub-001/roi/_tseg_teeth/lower_jawbone.nii.gz
+
+# reuse TotalSegmentator/VISTA/manual anatomy masks as fat/tongue priors
+stroke-cta-osa extract /path/to/cta.nii.gz --out outputs/run01 \
+    --external-tongue-mask /totalseg/head_muscles/tongue.nii.gz \
+    --dental-mandible-mask /dental/runs/sub-001/roi/_tseg_teeth/lower_jawbone.nii.gz
+
+# or point at a dental pipeline output directory and let the CLI discover it
+stroke-cta-osa extract /path/to/cta.nii.gz --out outputs/run01 \
+    --dental-artifacts-dir /dental/runs/sub-001
 
 # batch a directory of NIfTI inputs
 stroke-cta-osa batch /data/cohort_niftis --out outputs/cohort --glob "*.nii.gz"
@@ -69,6 +107,21 @@ ingest ─► QC ─► airway provider chain ─► airway features
 3. `CTAFallbackAirwayAdapter` — HU-threshold + connected-component pharyngeal
    column selector. Marked `confidence='low'` in every output row.
 4. `NullAirwayAdapter` — emits NaN for every airway feature.
+
+Mandible is handled separately from the airway provider chain. A real dental
+pipeline mandible/jawbone mask is preferred when supplied with
+`--dental-mandible-mask` or discovered under `--dental-artifacts-dir`
+(`lower_jawbone.nii.gz`, `mandible.nii.gz`, or the TotalSegmentator-teeth
+subfolders). CTA-only mandible HU fallback is disabled by default because it
+was visually unstable.
+
+Tongue, mandible, oral-cavity, soft-palate, uvula, and tonsil masks can be
+provided from TotalSegmentator, VISTA-style outputs, manual Slicer edits, or the
+dental pipeline. When present, these masks are used as conservative anatomy
+priors for local parapharyngeal / retroglossal / subglosso-supraglottic /
+retropharyngeal fat ROIs. Fat itself is still defined by the configured HU
+window; the anatomy masks only constrain ROI geometry and are recorded in
+`fat_anatomy_prior_masks_used`.
 
 ## Design principles
 

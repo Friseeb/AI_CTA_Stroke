@@ -62,7 +62,12 @@ def test_generated_script_compiles(tmp_path):
     image_path = tmp_path / "cta.nii.gz"
     image_path.write_bytes(b"\x00")  # presence-only, not loaded by the test
     # Drop a couple of fake mask files matching the default roster
-    for basename in ("mask_airway", "mask_fat_cervical_total", "mask_fat_parapharyngeal_left"):
+    for basename in (
+        "mask_airway",
+        "mask_fat_cervical_total",
+        "mask_fat_deep_peripharyngeal",
+        "mask_fat_parapharyngeal_left",
+    ):
         (tmp_path / f"{basename}.nii.gz").write_bytes(b"\x00")
     script = tmp_path / "demo_load_qc.py"
     out = write_slicer_loader(
@@ -75,7 +80,9 @@ def test_generated_script_compiles(tmp_path):
     # Sanity: discovered exactly the files present, in declared roster order.
     assert "mask_airway" in text
     assert "mask_fat_cervical_total" in text
-    assert "mask_fat_parapharyngeal_left" in text
+    assert "mask_fat_deep_peripharyngeal" in text
+    # Level-specific PP/RG/SG strip masks are debug artifacts, not default QC.
+    assert "mask_fat_parapharyngeal_left" not in text
     # Files NOT present must not appear.
     assert "mask_fat_retropharyngeal" not in text
     assert "CASE_ID    = 'demo'" in text
