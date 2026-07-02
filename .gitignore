@@ -49,11 +49,15 @@ external/adn/
 
 # Local Claude Code settings (personal, per-machine)
 .claude/
-# Vendored external tools / downloaded model weights & datasets (managed on main
-# or downloaded locally; not committed from this working tree)
-external/nv_segment_ct/
+# Vendored external tools / downloaded model weights & datasets (local only)
 external/CTA-DEFACE/
 external/cardiac_ct_explorer/
 external/public_cardiac_ct_dataset/
 external/topcow_claim/
 external/topcow_weights/
+# VISTA3D / NV-Segment-CT pretrained weights — download from HuggingFace instead:
+#   https://huggingface.co/nvidia/NV-Segment-CT
+# (the nv_segment_ct code itself is tracked; only the weights are ignored)
+external/nv_segment_ct/vista3d_pretrained_model/model.pt
+external/nv_segment_ct/vista3d_pretrained_model/model.safetensors
+external/nv_segment_ct/vista3d_pretrained_model/model_monai1.3.pt

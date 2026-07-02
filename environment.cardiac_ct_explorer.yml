@@ -1,4 +1,6 @@
 name: cardiac-ct-explorer
+# DEPRECATED — superseded by environment.dgx_spark.yml for DGX Spark (GB10/aarch64).
+# Plain `torch` resolves to a CPU-only wheel on aarch64. Use environment.dgx_spark.yml.
 channels:
   - conda-forge
 dependencies:

@@ -1,0 +1,40 @@
+name: laa-pipeline
+# CPU-only fallback — any platform, no GPU required
+# Pipeline will run but slowly (TotalSegmentator ~5-10min/case on CPU).
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - nibabel>=5.2
+  - SimpleITK
+  - pydicom
+  - numpy>=1.25
+  - scipy>=1.10
+  - networkx>=3.2
+  - pandas
+  - tqdm
+  - scikit-image
+  - scikit-learn
+  - matplotlib
+  - pyyaml
+  - pip:
+      - torch
+      - torchvision
+      - monai>=1.6.0
+      - transformers>=4.40,<5
+      - huggingface_hub
+      - einops
+      - safetensors
+      - tokenizers
+      - TotalSegmentator
+      - CardiacCTExplorer
+      - typer
+      - rich
+      - pydantic>=2.6
+      - vtk
+      - trimesh
+      - rtree
+      - pyradiomics
+      - streamlit>=1.35
+      - plotly

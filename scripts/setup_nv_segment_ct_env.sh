@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# DEPRECATED for DGX Spark (aarch64, GB10). Use setup_dgx_spark_env.sh instead.
+# This script installs a CPU-only torch wheel on aarch64 and pulls transformers 5.x
+# which breaks VISTA3D. Kept only for reference on x86_64 macOS/Linux setups.
 set -euo pipefail
 
 # Create a separate env for NV-Segment-CT (VISTA3D) inference.

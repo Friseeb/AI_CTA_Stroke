@@ -1,0 +1,44 @@
+name: laa-pipeline
+# Windows 10/11 + CUDA 12.8 (NVIDIA GPU required for full pipeline)
+#
+# Usage (Anaconda Prompt or PowerShell with conda):
+#   scripts\setup_env.bat
+#
+# Note: CardiacCTExplorer may have limited Windows support.
+#       VISTA3D runs fine on Windows with CUDA.
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - nibabel>=5.2
+  - pydicom
+  - numpy>=1.25
+  - scipy>=1.10
+  - networkx>=3.2
+  - pandas
+  - tqdm
+  - scikit-image
+  - scikit-learn
+  - matplotlib
+  - pyyaml
+  - pip:
+      - --index-url https://download.pytorch.org/whl/cu128
+      - torch
+      - torchvision
+      - monai>=1.6.0
+      - transformers>=4.40,<5
+      - huggingface_hub
+      - einops
+      - safetensors
+      - tokenizers
+      - TotalSegmentator
+      - SimpleITK
+      - typer
+      - rich
+      - pydantic>=2.6
+      - trimesh
+      - rtree
+      - pyradiomics
+      - streamlit>=1.35
+      - plotly
