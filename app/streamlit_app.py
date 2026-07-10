@@ -1,4 +1,6 @@
-"""AI CTA Stroke — Pipeline Dashboard (Streamlit)
+"""DeepStroke — CTA Stroke Pipeline Dashboard (Streamlit)
+
+SOMA-branded front end for the dental / LAA / aortic / sleep-apnea pipelines.
 
 Launch:
     streamlit run app/streamlit_app.py
@@ -19,6 +21,147 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from app.runner import run_dental, run_laa, run_aortic, run_sleep_apnea  # noqa: E402
+
+_UPLOAD_DIR = REPO_ROOT / "app" / "_uploads"
+
+
+# ═══════════════════════════════════════════════════════════════
+# File selection helpers — native OS dialog + drag-and-drop
+# ═══════════════════════════════════════════════════════════════
+def _native_pick(mode: str) -> str | None:
+    """Open a native OS file/folder dialog and return the chosen path.
+
+    Runs a Tk dialog on the machine hosting Streamlit — works for local
+    sessions (the intended desktop use). Returns None if cancelled or if no
+    display is available (e.g. a headless/remote server), in which case the
+    user falls back to typing a path or drag-and-drop.
+    """
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.wm_attributes("-topmost", 1)
+        if mode == "dir":
+            path = filedialog.askdirectory(parent=root)
+        else:
+            path = filedialog.askopenfilename(
+                parent=root,
+                filetypes=[("NIfTI", "*.nii *.nii.gz"), ("DICOM / all files", "*.*")],
+            )
+        root.update()
+        root.destroy()
+        return path or None
+    except Exception as exc:  # noqa: BLE001 — headless server, no Tk, cancelled, etc.
+        st.session_state["_pick_error"] = (
+            f"Native file dialog unavailable ({exc}). Type a path or drag-and-drop instead."
+        )
+        return None
+
+
+def _default_case_id(path: str) -> str:
+    """Best-effort case id from a NIfTI filename (sub-001_acq-CTA_ct → sub-001)."""
+    name = Path(path).name
+    for ext in (".nii.gz", ".nii"):
+        if name.endswith(ext):
+            name = name[: -len(ext)]
+            break
+    return name.split("_acq")[0] if "_acq" in name else name
+
+
+def _stage_upload(uploaded) -> Path:
+    """Persist a drag-and-dropped file to a staging dir and return its path."""
+    _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    dest = _UPLOAD_DIR / uploaded.name
+    if not dest.exists() or dest.stat().st_size != uploaded.size:
+        dest.write_bytes(uploaded.getbuffer())
+    return dest
+
+
+def _pick_into(state_key: str, mode: str, also_case_id: bool = False) -> None:
+    """on_click callback: open native dialog, store result in session_state."""
+    picked = _native_pick(mode)
+    if picked:
+        st.session_state[state_key] = picked
+        if also_case_id and not st.session_state.get("case_id"):
+            st.session_state["case_id"] = _default_case_id(picked)
+
+
+# Default output root: BIDS derivatives if the data volume is mounted, else repo.
+_BIDS_ROOT = Path("/Volumes/DICOM5/slaobids")
+DERIVATIVES_ROOT = str((_BIDS_ROOT / "derivatives") if _BIDS_ROOT.is_dir()
+                       else REPO_ROOT / "outputs" / "derivatives")
+
+
+def _fs_browser(target_key: str, kind: str = "dir") -> None:
+    """Reliable in-app filesystem browser (no native dialog dependency).
+
+    Renders navigation controls; on selection writes the chosen path to
+    ``st.session_state[target_key]`` and closes the browser. Must be rendered
+    *before* the text_input that shares ``target_key`` so the write is legal.
+    kind='dir' selects a folder; kind='file' selects a NIfTI.
+    """
+    cwd_key = f"_cwd_{target_key}"
+    seed = st.session_state.get(target_key) or DERIVATIVES_ROOT
+    seed_p = Path(seed)
+    if seed_p.is_file():
+        seed_p = seed_p.parent
+    if not seed_p.is_dir():
+        seed_p = Path.home()
+    st.session_state.setdefault(cwd_key, str(seed_p))
+    cwd = Path(st.session_state[cwd_key])
+    if not cwd.is_dir():
+        cwd = Path.home()
+        st.session_state[cwd_key] = str(cwd)
+
+    st.caption(f"📂 `{cwd}`")
+    b1, b2, b3 = st.columns(3)
+    if b1.button("⬆ Up", key=f"up_{target_key}", use_container_width=True):
+        st.session_state[cwd_key] = str(cwd.parent)
+        st.rerun()
+    if b2.button("🏠 Home", key=f"hm_{target_key}", use_container_width=True):
+        st.session_state[cwd_key] = str(Path.home())
+        st.rerun()
+    if kind == "dir":
+        if b3.button("✅ Use this folder", key=f"pick_{target_key}", type="primary",
+                     use_container_width=True):
+            st.session_state[target_key] = str(cwd)
+            st.session_state[f"_open_br_{target_key}"] = False
+            st.rerun()
+
+    try:
+        subdirs = sorted((p.name for p in cwd.iterdir() if p.is_dir() and not p.name.startswith(".")),
+                         key=str.lower)
+    except (PermissionError, OSError):
+        subdirs = []
+    nav = st.selectbox("Open subfolder", ["—"] + subdirs, key=f"nav_{target_key}")
+    if nav != "—":
+        st.session_state[cwd_key] = str(cwd / nav)
+        st.rerun()
+
+    if kind == "file":
+        try:
+            files = sorted(p.name for p in cwd.iterdir()
+                           if p.is_file() and (p.name.endswith(".nii.gz") or p.name.endswith(".nii")))
+        except (PermissionError, OSError):
+            files = []
+        picked_file = st.selectbox("Pick a NIfTI here", ["—"] + files, key=f"file_{target_key}")
+        if picked_file != "—" and st.button("✅ Use this file", key=f"pickf_{target_key}",
+                                             type="primary"):
+            st.session_state[target_key] = str(cwd / picked_file)
+            if target_key == "nifti_path" and not st.session_state.get("case_id"):
+                st.session_state["case_id"] = _default_case_id(picked_file)
+            st.session_state[f"_open_br_{target_key}"] = False
+            st.rerun()
+
+
+def _browse_toggle(target_key: str, label: str = "📂 Browse") -> None:
+    """A button that toggles the in-app browser expander for target_key."""
+    flag = f"_open_br_{target_key}"
+    if st.button(label, key=f"tgl_{target_key}", use_container_width=True):
+        st.session_state[flag] = not st.session_state.get(flag, False)
+        st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -161,31 +304,109 @@ def _show_results(out_dir_str: str, case_id: str) -> None:
 
 # ── Page config ───────────────────────────────────────────────
 st.set_page_config(
-    page_title="AI CTA Stroke Pipeline",
+    page_title="DeepStroke",
     page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
+
+# ── SOMA brand theme (injected CSS) ───────────────────────────
+def _inject_brand() -> None:
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Cormorant+Garamond:wght@600;700&display=swap');
+
+        :root {
+            --soma-plum:#201436; --soma-royal:#4f2683; --soma-violet:#8f55e0;
+            --soma-yellow:#fcf05e; --soma-cream:#faf9f5; --soma-lav:#f1ecfa;
+            --soma-grey:#6b6862;
+        }
+        html, body, .stApp, [class*="css"] {
+            font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        code, pre, .stCode, [data-testid="stCode"] * {
+            font-family: 'IBM Plex Mono', ui-monospace, monospace !important;
+        }
+        h1, h2, h3, h4 { color: var(--soma-plum); letter-spacing: -0.01em; font-weight: 600; }
+
+        /* Primary buttons — SOMA violet */
+        .stButton > button[kind="primary"] {
+            background: var(--soma-violet); border: 1px solid var(--soma-royal);
+            color: #fff; font-weight: 600; border-radius: 8px;
+        }
+        .stButton > button[kind="primary"]:hover {
+            background: var(--soma-royal); border-color: var(--soma-plum);
+        }
+        .stButton > button[kind="secondary"] {
+            border-radius: 8px; border-color: #d9cef0;
+        }
+        .stButton > button[kind="secondary"]:hover {
+            border-color: var(--soma-violet); color: var(--soma-royal);
+        }
+        /* Sidebar accent rail */
+        [data-testid="stSidebar"] {
+            background: var(--soma-lav);
+            border-right: 1px solid #e3d8f6;
+        }
+        /* Tabs — active tab in violet */
+        .stTabs [aria-selected="true"] { color: var(--soma-royal) !important; }
+        .stTabs [data-baseweb="tab-highlight"] { background: var(--soma-violet) !important; }
+
+        /* DeepStroke wordmark */
+        .ds-brand { display:flex; align-items:center; gap:10px; margin:2px 0 0; }
+        .ds-mark {
+            width:34px; height:34px; border-radius:9px; flex:none;
+            background: radial-gradient(circle at 32% 30%, var(--soma-violet), var(--soma-royal) 70%);
+            box-shadow: 0 0 0 3px #e7dbfa;
+            position:relative;
+        }
+        .ds-mark::after{
+            content:""; position:absolute; inset:11px; border-radius:50%;
+            background: var(--soma-yellow);
+        }
+        .ds-name { font-size:26px; font-weight:700; color:var(--soma-plum); line-height:1; letter-spacing:-0.02em; }
+        .ds-name .accent { color: var(--soma-violet); }
+        .ds-tag { font-size:11px; letter-spacing:0.14em; text-transform:uppercase;
+                  color:var(--soma-grey); margin-top:6px; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+_inject_brand()
+
 # ── Sidebar ───────────────────────────────────────────────────
 with st.sidebar:
-    st.title("🧠 AI CTA Stroke")
+    st.markdown(
+        """
+        <div class="ds-brand">
+          <span class="ds-mark"></span>
+          <span class="ds-name">Deep<span class="accent">Stroke</span></span>
+        </div>
+        <div class="ds-tag">CTA stroke pipelines · SOMA Lab</div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.caption("Research prototype — not for clinical use")
     st.divider()
 
     pipelines = st.multiselect(
-        "Pipelines",
+        "Pipelines to run",
         ["Dental", "LAA", "Aortic", "Sleep Apnea"],
-        default=["Dental"],
+        default=["Aortic"],
     )
 
-    aortic_tasks: list[str] = []
-    if "Aortic" in pipelines:
-        aortic_tasks = st.multiselect(
-            "Aortic tasks",
-            ["Calcium", "Fat", "Wall"],
-            default=["Calcium", "Fat", "Wall"],
-        )
+    # Always visible so the Calcium/Fat/Wall choice is never hidden.
+    aortic_tasks = st.multiselect(
+        "Aortic tasks (Calcium / Fat / Wall)",
+        ["Calcium", "Fat", "Wall"],
+        default=["Calcium", "Fat", "Wall"],
+        disabled="Aortic" not in pipelines,
+        help="Which aortic feature stages to surface. Enable the Aortic pipeline above to use these.",
+    )
 
     st.divider()
     device = st.selectbox(
@@ -209,19 +430,64 @@ tab_single, tab_batch, tab_results = st.tabs(["Single Patient", "Batch", "Result
 with tab_single:
     st.header("Single Patient")
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        nifti_path_str = st.text_input(
+    # Seed persistent keys once.
+    st.session_state.setdefault("nifti_path", "")
+    st.session_state.setdefault("case_id", "")
+    st.session_state.setdefault("out_dir", DERIVATIVES_ROOT)
+
+    st.markdown("**Input CTA** — drag & drop, browse, or paste a path")
+
+    # 1) Drag-and-drop upload (staged to disk; fires once per new file).
+    uploaded = st.file_uploader(
+        "Drag & drop a CTA NIfTI here",
+        type=["gz", "nii"],
+        key="nifti_upload",
+        help="For very large or already-on-disk scans, use 📂 Browse instead — no copy.",
+    )
+    if uploaded is not None:
+        _sig = (uploaded.name, uploaded.size)
+        if st.session_state.get("_uploaded_sig") != _sig:
+            st.session_state["_uploaded_sig"] = _sig
+            st.session_state["nifti_path"] = str(_stage_upload(uploaded))
+            if not st.session_state["case_id"]:
+                st.session_state["case_id"] = _default_case_id(st.session_state["nifti_path"])
+
+    # 2) In-app file browser (rendered BEFORE the text field so it may set the key).
+    if st.session_state.get("_open_br_nifti_path"):
+        with st.container(border=True):
+            _fs_browser("nifti_path", kind="file")
+    c_path, c_browse = st.columns([5, 1])
+    with c_path:
+        st.text_input(
             "NIfTI path",
+            key="nifti_path",
             placeholder="/media/friseb/LAAforLAAs/.../sub-001_acq-CTA_ct.nii.gz",
-            help="Absolute path to the CTA NIfTI file on disk.",
+            help="Absolute path on disk — or use Browse / drag-and-drop above.",
         )
-    with col2:
-        case_id = st.text_input("Case ID", placeholder="sub-001")
-        out_dir_str = st.text_input(
+    with c_browse:
+        st.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+        _browse_toggle("nifti_path", "📂 Browse")
+
+    st.text_input("Case ID", key="case_id", placeholder="sub-001")
+
+    st.markdown("**Output — a BIDS derivatives folder**")
+    if st.session_state.get("_open_br_out_dir"):
+        with st.container(border=True):
+            _fs_browser("out_dir", kind="dir")
+    c_out, c_out_b = st.columns([5, 1])
+    with c_out:
+        st.text_input(
             "Output directory",
-            placeholder="/tmp/pipeline_out",
+            key="out_dir",
+            help="Results are written here (defaults to the derivatives folder).",
         )
+    with c_out_b:
+        st.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+        _browse_toggle("out_dir", "📂 Browse")
+
+    nifti_path_str = st.session_state["nifti_path"]
+    case_id = st.session_state["case_id"]
+    out_dir_str = st.session_state["out_dir"]
 
     run_btn = st.button("▶  Run pipeline", type="primary", use_container_width=True)
 
@@ -289,20 +555,36 @@ with tab_single:
 with tab_batch:
     st.header("Batch Run")
 
+    st.session_state.setdefault("batch_in", "")
+    st.session_state.setdefault("batch_out", DERIVATIVES_ROOT)
+
+    # In-app browsers rendered first so they may set the keys before text_inputs.
+    if st.session_state.get("_open_br_batch_in"):
+        with st.container(border=True):
+            st.caption("Choose input directory")
+            _fs_browser("batch_in", kind="dir")
+    if st.session_state.get("_open_br_batch_out"):
+        with st.container(border=True):
+            st.caption("Choose output root")
+            _fs_browser("batch_out", kind="dir")
+
     col1, col2 = st.columns(2)
     with col1:
-        input_dir_str = st.text_input(
+        st.text_input(
             "Input directory",
+            key="batch_in",
             placeholder="/media/friseb/LAAforLAAs/bids/derivatives/defaced",
-            help="Directory containing NIfTI files (*_ct.nii.gz).",
+            help="Directory containing NIfTI files — Browse or paste a path.",
         )
+        _browse_toggle("batch_in", "📂 Browse input folder")
         glob_pattern = st.text_input("Glob pattern", value="*_ct.nii.gz")
     with col2:
-        batch_out_str = st.text_input(
-            "Output root",
-            placeholder="/tmp/batch_out",
-        )
+        st.text_input("Output root (derivatives)", key="batch_out")
+        _browse_toggle("batch_out", "📂 Browse output folder")
         limit = st.number_input("Max cases (0 = all)", min_value=0, value=0, step=1)
+
+    input_dir_str = st.session_state["batch_in"]
+    batch_out_str = st.session_state["batch_out"]
 
     skip_existing = st.checkbox("Skip already-completed cases", value=True)
     batch_btn = st.button("▶  Start batch", type="primary", use_container_width=True)

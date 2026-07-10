@@ -1,0 +1,16 @@
+# DeepStroke dashboard config
+[server]
+maxUploadSize = 2000   # MB — CTA NIfTI files are large (~270 MB); allow big drag-and-drop
+headless = true
+
+[browser]
+gatherUsageStats = false
+
+# SOMA brand — deep plum ground, violet accent, warm cream surfaces
+[theme]
+base = "light"
+primaryColor = "#8f55e0"             # SOMA violet
+backgroundColor = "#faf9f5"          # warm cream
+secondaryBackgroundColor = "#f1ecfa" # light lavender (sidebar / widgets)
+textColor = "#201436"                # deep plum
+font = "sans serif"

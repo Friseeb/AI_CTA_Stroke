@@ -61,3 +61,7 @@ external/topcow_weights/
 external/nv_segment_ct/vista3d_pretrained_model/model.pt
 external/nv_segment_ct/vista3d_pretrained_model/model.safetensors
 external/nv_segment_ct/vista3d_pretrained_model/model_monai1.3.pt
+
+# Streamlit dashboard upload staging
+app/_uploads/
+.streamlit/secrets.toml
