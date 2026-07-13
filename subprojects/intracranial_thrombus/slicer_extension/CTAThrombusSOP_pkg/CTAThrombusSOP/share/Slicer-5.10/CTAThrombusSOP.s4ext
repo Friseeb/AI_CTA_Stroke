@@ -1,0 +1,10 @@
+# Extension description file
+name CTAThrombusSOP
+scm local
+scmurl https://github.com/Friseeb/AI_CTA_Stroke
+scmrevision main
+homepage https://github.com/Friseeb/AI_CTA_Stroke
+category CTA-in-AI
+description Manual intracranial thrombus demarcation wizard for multiphase CTA. Supports arterial + delay phases, vessel/side annotation, auto thrombus volume and length.
+contributors Sebastian Fridman
+depends
