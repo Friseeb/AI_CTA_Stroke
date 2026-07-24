@@ -13,6 +13,7 @@ LONG_FEATURE_FILES = [
     "case_level_features.csv",
     "calcification_features.csv",
     "calcium_omics_features.csv",
+    "calcium_topography_features.csv",
     "fat_omics_features.csv",
     "lumen_protrusion_summary_features.csv",
     "wall_from_fat_features.csv",
