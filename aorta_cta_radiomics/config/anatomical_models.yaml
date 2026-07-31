@@ -1,0 +1,133 @@
+schema_version: 1
+updated: 2026-07-31
+policy:
+  role: "Coarse segmentations are locators, exclusion masks, weak labels, or prior channels; they are not assumed accurate at the artery-tissue interface."
+  geometry: "Every mask must match CTA shape and affine or be explicitly resampled with nearest-neighbour interpolation and recorded provenance."
+  missing_model: "Missing masks remain missing; the pipeline must not invent an anatomical label."
+
+models:
+  flowcat_arterial_2026_03:
+    model_name: "FLOWCAT Arterial"
+    version: "models/2026-03"
+    source_repository: "https://github.com/FLOWCAT-CV/arterial"
+    commit: "1991ca5b238d7c868c9c3a0a390057bc89aee559"
+    licence: "CC-BY-NC-4.0 (LICENSE file is authoritative; repository badge is inconsistent)"
+    modality: "contrast-enhanced CTA"
+    supported_anatomy: "aortic arch, extracranial and intracranial arterial tree"
+    relevant_labels: [AA, BT, RCCA, LCCA, RSA, LSA, RVA, LVA, RICA, LICA, RECA, LECA, BA, other]
+    expected_spacing: "model-specific nnU-Net plans; native output returned on input grid"
+    input_format: "NIfTI CTA"
+    output_format: "NIfTI, VTK/STL, NumPy object array, NetworkX pickle, JSON"
+    weights_available: true
+    weight_location: "external/arterial_flowcat/arterial/{segmentation,vessel_labelling}/models (ignored local checkout)"
+    inference_command: "See subprojects/studies/anterior_circulation_supraaortic/README.md; full chain should run in a pinned Linux VMTK/PyG environment."
+    hardware_requirements: "fast-lowres segmentation can use CPU; hybrid/full chain is intended for CUDA and needs VTK, VMTK, torch-geometric and torch-cluster"
+    arm64_compatibility: "segmentation verified on macOS ARM64 CPU; full VMTK/GNN chain not available in one local ARM64 environment"
+    known_limitations: "Non-commercial licence; current five-case outputs contain binary segmentation only; native centreline, branch and labelled-graph outputs are missing."
+    current_project_role: "authoritative arterial segmentation/centreline/branch/anatomical-label source once native outputs pass QC"
+    validation_status: "five fast-lowres binary masks automated-integrity pass and visual pending; full native chain not validated"
+
+  totalsegmentator_total_v2:
+    model_name: "TotalSegmentator total task"
+    version: "2.12.0 for the recorded adaptive-v2 bone runs"
+    source_repository: "https://github.com/wasserth/TotalSegmentator"
+    commit: null
+    licence: "Apache-2.0 code; verify the terms attached to each downloaded model payload before redistribution or commercial use"
+    modality: "CT"
+    supported_anatomy: "whole-body coarse organs, bones, muscles and vessels"
+    relevant_labels: [vertebrae_C1-C7, clavicula_left, clavicula_right, scapula_left, scapula_right, sternum, ribs, skull, thyroid_gland, trachea]
+    expected_spacing: "task dependent; full-resolution outputs are preferred"
+    input_format: "NIfTI CT"
+    output_format: "per-class NIfTI or multilabel NIfTI"
+    weights_available: true
+    weight_location: "managed by the TotalSegmentator installation; not stored in this package"
+    inference_command: "TotalSegmentator -i CTA.nii.gz -o OUTPUT --task total"
+    hardware_requirements: "CPU, CUDA or MPS depending on build; large head-to-heart CTA can require substantial RAM"
+    arm64_compatibility: "verified locally with TotalSegmentator 2.12.0 using MPS/CPU for selected tasks"
+    known_limitations: "coarse at vessel interfaces; total task does not supply a complete dental/mandibular exclusion map; label definitions are version-sensitive"
+    current_project_role: "coarse bone, thyroid, airway and regional context; never arterial-label authority"
+    validation_status: "geometry and automated integrity verified in five development cases; visual QC remains pending"
+
+  totalsegmentator_craniofacial_v2:
+    model_name: "TotalSegmentator craniofacial_structures task"
+    version: "2.12.0 for recorded adaptive-v2 runs"
+    source_repository: "https://github.com/wasserth/TotalSegmentator"
+    commit: null
+    licence: "Apache-2.0 code; verify model-payload terms"
+    modality: "CT"
+    supported_anatomy: "craniofacial bones and cavities"
+    relevant_labels: [skull, mandible, teeth_upper, teeth_lower]
+    expected_spacing: "task dependent"
+    input_format: "NIfTI CT"
+    output_format: "per-class NIfTI"
+    weights_available: true
+    weight_location: "TotalSegmentator cache; recorded checkpoint SHA-256 is stored in adaptive-v2 provenance"
+    inference_command: "TotalSegmentator -i CTA.nii.gz -o OUTPUT --task craniofacial_structures"
+    hardware_requirements: "CPU, CUDA or MPS depending on build"
+    arm64_compatibility: "verified locally with MPS for the five-case development run"
+    known_limitations: "does not solve metal streak or calcium blooming; masks remain coarse near small arteries"
+    current_project_role: "skull, mandible and dental exclusion for high-attenuation contamination"
+    validation_status: "automated geometry/non-empty checks pass in the five development cases; visual QC pending"
+
+  vista3d_nv_segment_ct:
+    model_name: "VISTA3D / NV-Segment-CT"
+    version: "local bundle version must be captured per run"
+    source_repository: "https://github.com/Project-MONAI/VISTA"
+    commit: null
+    licence: "Apache-2.0 repository code; verify the downloaded bundle/model-card terms before redistribution"
+    modality: "CT"
+    supported_anatomy: "promptable multi-organ CT segmentation"
+    relevant_labels: [aorta]
+    expected_spacing: "bundle-defined inference spacing"
+    input_format: "NIfTI CT"
+    output_format: "NIfTI labelmap"
+    weights_available: true
+    weight_location: "external/nv_segment_ct or configured MONAI bundle cache"
+    inference_command: "python scripts/run_nv_segment_ct_laa.py --input CTA --output MASK --label 6"
+    hardware_requirements: "CUDA preferred; CPU fallback; MPS behavior is bundle/version dependent"
+    arm64_compatibility: "aorta inference is used locally but some transforms require CPU fallback"
+    known_limitations: "provides aorta context, not named cervical branches or perivascular tissues"
+    current_project_role: "existing aortic lumen source for the legacy pipeline; optional proximal context"
+    validation_status: "used in maintained aorta runs; not validated for carotid tissue interfaces"
+
+  musclemap:
+    model_name: "MuscleMap"
+    version: null
+    source_repository: null
+    commit: null
+    licence: "unknown - no installed or connected implementation was found"
+    modality: "CT"
+    supported_anatomy: "skeletal muscle"
+    relevant_labels: [sternocleidomastoid, longus_colli, scalene, strap_muscle]
+    expected_spacing: null
+    input_format: null
+    output_format: null
+    weights_available: false
+    weight_location: null
+    inference_command: null
+    hardware_requirements: null
+    arm64_compatibility: "unable to verify"
+    known_limitations: "named model was mentioned by the specification but no repository, weights or execution evidence exists locally"
+    current_project_role: "none; registry placeholder only"
+    validation_status: "unavailable"
+
+  custom_bone_aware_partition:
+    model_name: "Deterministic bone-aware calcium partition"
+    version: "adaptive-v2 development implementation"
+    source_repository: "this repository"
+    commit: "working tree; capture parent Git SHA plus script SHA-256 per run"
+    licence: "project licence; consumes separately licensed TotalSegmentator outputs"
+    modality: "CTA plus bone masks"
+    supported_anatomy: "bone-connected high-attenuation contamination"
+    relevant_labels: [retained_calcium_candidate, definite_bone, ambiguous]
+    expected_spacing: "native CTA grid"
+    input_format: "NIfTI CTA, artery mask and bone masks"
+    output_format: "NIfTI masks plus JSON provenance"
+    weights_available: false
+    weight_location: null
+    inference_command: "python subprojects/studies/anterior_circulation_supraaortic/scripts/run_adaptive_vessel_burden_v2.py --all --fail-fast"
+    hardware_requirements: "CPU and sufficient RAM"
+    arm64_compatibility: "verified on local ARM64"
+    known_limitations: "development whole-tree method; named target-vessel scope and proximal bone completeness are unresolved"
+    current_project_role: "reusable deterministic exclusion logic after named-vessel rasterization"
+    validation_status: "unit-tested and executed on five cases; visual and reader-reference validation pending"

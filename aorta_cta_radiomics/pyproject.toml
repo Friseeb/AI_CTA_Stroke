@@ -13,6 +13,7 @@ authors = [
   {name = "Sebastian Fridman"}
 ]
 dependencies = [
+  "cta_common>=0.1.0",
   "numpy",
   "scipy",
   "pandas",
@@ -20,6 +21,7 @@ dependencies = [
   "scikit-learn",
   "SimpleITK",
   "nibabel",
+  "networkx>=3",
   "pyradiomics==3.0.1",
   "PyYAML",
   "typer",
@@ -29,8 +31,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mesh = ["pyvista", "trimesh"]
+mesh = ["vtk", "pyvista", "trimesh"]
 monai = ["monai", "torch"]
+table = ["pyarrow"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]
@@ -39,6 +42,8 @@ aorta-cta-qc = "aorta_cta_radiomics.qc_slicer:main"
 aorta-cta-staged = "aorta_cta_radiomics.staged:main"
 aorta-cta-watchdog = "aorta_cta_radiomics.batch_watchdog:main"
 aorta-cta-progress = "aorta_cta_radiomics.batch_progress:main"
+aorta-cta-carotid = "aorta_cta_radiomics.carotid_cli:main"
+aorta-cta-carotid-qc = "aorta_cta_radiomics.carotid_qc:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
