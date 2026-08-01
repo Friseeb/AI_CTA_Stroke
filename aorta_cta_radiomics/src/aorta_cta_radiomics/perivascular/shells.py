@@ -9,6 +9,7 @@ import numpy as np
 
 from cta_common.shells import external_shell
 
+from ..crop import crop_region_for_mask
 from ._spatial import validate_spacing, voxel_volume_mm3
 from .exclusions import ExclusionResult, apply_shell_exclusions
 
@@ -328,8 +329,30 @@ def generate_adaptive_shell(
     spacing = validate_spacing(spacing_xyz)
     if partial_volume_boundary_mm < 0:
         raise ValueError("partial_volume_boundary_mm must be non-negative.")
-    padded_raw, _, crop, representative = _adaptive_padded_mask(lumen, spacing, diameter_mm, law)
-    raw = padded_raw[crop]
+    # Adaptive EDT needs only the lumen neighbourhood.  Include a two-voxel
+    # physical safety halo beyond the maximum extent so artificial crop edges
+    # cannot affect any accepted shell voxel.  _adaptive_padded_mask then pads
+    # this local image as before, preserving expected out-of-FOV shell counts
+    # when the true lumen touches an image boundary.
+    region = crop_region_for_mask(
+        lumen,
+        spacing,
+        margin_mm=float(law.maximum_mm) + 2.0 * max(spacing),
+    )
+    local_lumen = np.asarray(region.crop(lumen), dtype=bool)
+    diameter_array = np.asarray(diameter_mm)
+    local_diameter: float | np.ndarray
+    if diameter_array.ndim == 0:
+        local_diameter = float(diameter_array)
+    else:
+        if diameter_array.shape != lumen.shape:
+            raise ValueError("A diameter map must have the same shape as lumen_mask.")
+        local_diameter = np.asarray(region.crop(diameter_array), dtype=float)
+    padded_raw, _, crop, representative = _adaptive_padded_mask(
+        local_lumen, spacing, local_diameter, law
+    )
+    local_raw = padded_raw[crop]
+    raw = region.paste(local_raw, fill_value=False)
     partial_volume = (
         external_shell(lumen, spacing, 0.0, float(partial_volume_boundary_mm))
         if partial_volume_boundary_mm > 0

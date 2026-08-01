@@ -4,6 +4,7 @@ from aorta_cta_radiomics.perivascular.exclusions import bifurcation_exclusion_ma
 from aorta_cta_radiomics.perivascular.shells import (
     AdaptiveShellLaw,
     RadialBand,
+    _adaptive_padded_mask,
     generate_adaptive_shell,
     generate_radial_shells,
 )
@@ -109,3 +110,41 @@ def test_capped_adaptive_shell_law_has_minimum_and_maximum_and_drives_shell_exte
     assert adaptive[10, 10, 13]  # 3 mm
     assert not adaptive[10, 10, 14]  # > locally capped alpha * diameter
     assert result.parameters["adaptive_law"]["formula"].startswith("clip")
+
+
+def test_adaptive_shell_local_edt_matches_full_grid_reference_at_image_boundary(monkeypatch):
+    from scipy import ndimage as ndi
+
+    shape = (61, 63, 65)
+    lumen = np.zeros(shape, dtype=bool)
+    lumen[27:34, 29:36, 0:3] = True
+    diameter = np.zeros(shape, dtype=np.float32)
+    diameter[lumen] = np.linspace(2.0, 8.0, int(lumen.sum()), dtype=np.float32)
+    spacing = (0.8, 1.1, 1.7)
+    law = AdaptiveShellLaw(alpha=0.75, minimum_mm=1.7, maximum_mm=5.0)
+
+    full_padded, _, full_crop, _ = _adaptive_padded_mask(lumen, spacing, diameter, law)
+    expected_raw = full_padded[full_crop]
+    expected_complete_voxels = int(full_padded.sum())
+
+    original_edt = ndi.distance_transform_edt
+    edt_shapes: list[tuple[int, ...]] = []
+
+    def tracking_edt(array, *args, **kwargs):
+        edt_shapes.append(tuple(array.shape))
+        return original_edt(array, *args, **kwargs)
+
+    monkeypatch.setattr(ndi, "distance_transform_edt", tracking_edt)
+    result = generate_adaptive_shell(
+        lumen,
+        spacing,
+        diameter,
+        vessel_id="boundary_ica",
+        law=law,
+    ).bands["adaptive_shell"]
+
+    assert np.array_equal(result.raw_mask, expected_raw)
+    assert result.expected_complete_voxels == expected_complete_voxels
+    assert result.boundary_missing_voxels > 0
+    assert edt_shapes
+    assert all(np.prod(call_shape) < 0.20 * np.prod(shape) for call_shape in edt_shapes)

@@ -78,7 +78,17 @@ def aggregate_radial_profiles(
         band = np.asarray(mask, dtype=bool)
         if band.shape != image.shape:
             raise ValueError(f"Radial band {name} does not share the image shape.")
-        record = _profile_record(band, image, labels, valid, voxel_volume)
+        # Compact each sparse shell once.  _profile_record is dimension
+        # agnostic, so this is exactly equivalent to repeatedly combining
+        # CTA-sized Boolean arrays for every tissue class.
+        compact_mask = np.ones(int(band.sum()), dtype=bool)
+        record = _profile_record(
+            compact_mask,
+            image[band],
+            labels[band],
+            valid[band],
+            voxel_volume,
+        )
         record.update({"radial_band": str(name), "radial_band_order": order})
         records.append(record)
     return records
@@ -109,13 +119,14 @@ def aggregate_longitudinal_profiles(
         raise ValueError("Image, labels, ROI, and path map must be same-shaped 3D arrays.")
     if not np.isfinite(bin_length_mm) or bin_length_mm <= 0:
         raise ValueError("bin_length_mm must be positive and finite.")
-    valid = roi & np.isfinite(path)
+    domain = roi & np.isfinite(path)
+    valid = domain.copy()
     if valid_mask is not None:
         supplied = np.asarray(valid_mask, dtype=bool)
         if supplied.shape != image.shape:
             raise ValueError("valid_mask must share the image shape.")
         valid &= supplied
-    finite_path = path[roi & np.isfinite(path)]
+    finite_path = path[domain]
     inferred_length = float(np.max(finite_path)) if finite_path.size else 0.0
     length = inferred_length if vessel_length_mm is None else float(vessel_length_mm)
     if not np.isfinite(length) or length < 0:
@@ -126,14 +137,24 @@ def aggregate_longitudinal_profiles(
     if edges[-1] < length:
         edges = np.append(edges, length)
     voxel_volume = voxel_volume_mm3(validate_spacing(spacing_xyz))
+    compact_image = image[domain]
+    compact_labels = labels[domain]
+    compact_valid = valid[domain]
+    compact_path = path[domain]
     records: list[dict[str, object]] = []
     for index in range(len(edges) - 1):
         lower, upper = float(edges[index]), float(edges[index + 1])
         if index == len(edges) - 2:
-            selected = roi & np.isfinite(path) & (path >= lower) & (path <= upper)
+            selected = (compact_path >= lower) & (compact_path <= upper)
         else:
-            selected = roi & np.isfinite(path) & (path >= lower) & (path < upper)
-        record = _profile_record(selected, image, labels, valid, voxel_volume)
+            selected = (compact_path >= lower) & (compact_path < upper)
+        record = _profile_record(
+            selected,
+            compact_image,
+            compact_labels,
+            compact_valid,
+            voxel_volume,
+        )
         record.update(
             {
                 "longitudinal_bin": index,

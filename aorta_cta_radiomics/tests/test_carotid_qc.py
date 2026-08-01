@@ -138,6 +138,7 @@ def test_complete_manifest_and_all_optional_overlays_are_recorded_without_inferr
         segmentation_path=segmentation,
         flowcat_manifest_path=manifest,
         outdir=tmp_path / "qc",
+        focus_overlay="shell",
         **paths,
     )
 
@@ -154,6 +155,11 @@ def test_complete_manifest_and_all_optional_overlays_are_recorded_without_inferr
         "label_map_available_but_named_measurements_not_generated"
     )
     assert report["named_artery_results"]["label_ids_available_for_visual_qc"] == [3, 9]
+    selection = report["display"]["selection"]
+    assert selection["method"] == "provided_overlay_foreground_voxel_nearest_physical_median"
+    assert selection["focus_overlay"] == "shell"
+    assert selection["anatomical_claim"] == "focus_from_provided_overlay_not_inferred_anatomy"
+    assert shell[tuple(selection["canonical_voxel_ijk"])] != 0
     assert report["manual_review"]["required"] is True
     assert report["manual_review"]["reasons"] == ["visual_review_pending"]
 

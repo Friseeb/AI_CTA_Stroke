@@ -133,19 +133,39 @@ def _surface_faces(lumen: np.ndarray, spacing_xyz: tuple[float, float, float]) -
     )
 
 
-def _number_of_regions(shape: tuple[int, ...], coords: np.ndarray) -> tuple[int, np.ndarray]:
+def _number_of_regions(
+    shape: tuple[int, ...],
+    coords: np.ndarray,
+) -> tuple[int, np.ndarray, tuple[int, int, int]]:
+    """Label contact regions in the smallest topology-preserving crop.
+
+    Contact voxels occupy only the arterial surface.  Allocating and labelling
+    an entire CTA-sized array for every tissue class and contact distance is
+    therefore unnecessary.  A one-voxel halo preserves the same 18-connected
+    component topology as a full-grid label operation.
+    """
     from scipy import ndimage as ndi
 
-    mask = np.zeros(shape, dtype=bool)
-    if coords.size:
-        mask[tuple(coords.T)] = True
+    if not coords.size:
+        return 0, np.zeros((1, 1, 1), dtype=np.int32), (0, 0, 0)
+    coordinates = np.asarray(coords, dtype=int).reshape((-1, 3))
+    full_shape = np.asarray(shape, dtype=int)
+    if np.any(coordinates < 0) or np.any(coordinates >= full_shape):
+        raise ValueError("Contact-region coordinates fall outside the image grid.")
+    minimum = np.maximum(coordinates.min(axis=0) - 1, 0)
+    maximum = np.minimum(coordinates.max(axis=0) + 2, full_shape)
+    local_shape = tuple(int(value) for value in maximum - minimum)
+    mask = np.zeros(local_shape, dtype=bool)
+    local_coordinates = coordinates - minimum
+    mask[tuple(local_coordinates.T)] = True
     labelled, count = ndi.label(mask, structure=ndi.generate_binary_structure(3, 2))
-    return int(count), labelled
+    return int(count), labelled, tuple(int(value) for value in minimum)
 
 
 def _contiguous_length(
     labelled: np.ndarray,
     count: int,
+    offset_zyx: tuple[int, int, int],
     coordinate_system: VesselCoordinateSystem | None,
     spacing_xyz: tuple[float, float, float],
     origin_xyz: Sequence[float],
@@ -156,11 +176,54 @@ def _contiguous_length(
     total = 0.0
     resolution = min(float(coordinate_system.resample_interval_mm), min(spacing_xyz))
     for component in range(1, count + 1):
-        coords = np.argwhere(labelled == component)
+        coords = np.argwhere(labelled == component) + np.asarray(offset_zyx, dtype=int)
         physical = indices_zyx_to_physical_xyz(coords, spacing_xyz, origin_xyz, direction)
         path = coordinate_system.physical_to_vessel(physical).path_mm
         total += max(resolution, float(np.ptp(path)) + resolution)
     return total
+
+
+def _bounded_distance_values_at_exterior(
+    labels: np.ndarray,
+    label_value: int,
+    exterior_zyx: np.ndarray,
+    exterior_valid: np.ndarray,
+    spacing_xyz: tuple[float, float, float],
+    maximum_distance_mm: float,
+) -> np.ndarray:
+    """Return exact EDT values only where surface contact is queried.
+
+    The crop has a two-voxel safety halo beyond the largest requested physical
+    distance.  A class voxel outside that crop cannot change whether a sampled
+    exterior voxel is within ``maximum_distance_mm``.  This preserves the
+    thresholded full-grid EDT result while avoiding CTA-sized distance maps for
+    every tissue class.
+    """
+    values = np.full(len(exterior_zyx), np.inf, dtype=float)
+    valid_indices = np.flatnonzero(exterior_valid)
+    if not valid_indices.size:
+        return values
+    sample_coordinates = np.asarray(exterior_zyx[valid_indices], dtype=int)
+    spacing_zyx = np.asarray(
+        (spacing_xyz[2], spacing_xyz[1], spacing_xyz[0]), dtype=float
+    )
+    pad = np.ceil(float(maximum_distance_mm) / spacing_zyx).astype(int) + 2
+    full_shape = np.asarray(labels.shape, dtype=int)
+    minimum = np.maximum(sample_coordinates.min(axis=0) - pad, 0)
+    maximum = np.minimum(sample_coordinates.max(axis=0) + pad + 1, full_shape)
+    slices = tuple(
+        slice(int(minimum[axis]), int(maximum[axis])) for axis in range(3)
+    )
+    class_crop = np.asarray(labels[slices] == int(label_value), dtype=bool)
+    if not class_crop.any():
+        return values
+
+    from scipy import ndimage as ndi
+
+    distance_crop = ndi.distance_transform_edt(~class_crop, sampling=tuple(spacing_zyx))
+    local_coordinates = sample_coordinates - minimum
+    values[valid_indices] = distance_crop[tuple(local_coordinates.T)]
+    return values
 
 
 def _profiles(
@@ -270,16 +333,16 @@ def calculate_surface_contacts(
         paths = coordinates.path_mm
         angles = coordinates.angle_rad
 
-    from scipy import ndimage as ndi
-
-    sampling_zyx = (spacing[2], spacing[1], spacing[0])
-    distance_maps: dict[str, np.ndarray] = {}
+    maximum_distance = max(distances)
+    distance_values: dict[str, np.ndarray] = {}
     for name, value in classes.items():
-        class_mask = labels == value
-        distance_maps[name] = (
-            ndi.distance_transform_edt(~class_mask, sampling=sampling_zyx)
-            if class_mask.any()
-            else np.full(labels.shape, np.inf, dtype=float)
+        distance_values[name] = _bounded_distance_values_at_exterior(
+            labels,
+            value,
+            faces.exterior_zyx,
+            faces.exterior_valid,
+            spacing,
+            maximum_distance,
         )
     results: dict[float, ContactDistanceResult] = {}
     global_flags: set[str] = set()
@@ -289,13 +352,8 @@ def calculate_surface_contacts(
         global_flags.add("empty_assessable_surface")
     for distance in distances:
         contact_by_class: dict[str, np.ndarray] = {}
-        for name, distance_map in distance_maps.items():
-            contact = np.zeros(len(faces.area_mm2), dtype=bool)
-            valid_indices = np.flatnonzero(faces.exterior_valid)
-            if valid_indices.size:
-                outside = faces.exterior_zyx[valid_indices]
-                contact[valid_indices] = distance_map[tuple(outside.T)] <= distance + 1.0e-9
-            contact_by_class[name] = contact
+        for name, values in distance_values.items():
+            contact_by_class[name] = faces.exterior_valid & (values <= distance + 1.0e-9)
         if contact_by_class:
             multiplicity = np.stack(list(contact_by_class.values()), axis=0).sum(axis=0)
         else:
@@ -317,10 +375,13 @@ def calculate_surface_contacts(
                 if contact.any()
                 else np.empty((0, 3), int)
             )
-            region_count, labelled_regions = _number_of_regions(lumen.shape, unique_interior)
+            region_count, labelled_regions, region_offset = _number_of_regions(
+                lumen.shape, unique_interior
+            )
             contiguous_length = _contiguous_length(
                 labelled_regions,
                 region_count,
+                region_offset,
                 coordinate_system,
                 spacing,
                 origin_xyz,
@@ -379,7 +440,7 @@ def calculate_surface_contacts(
     return SurfaceContactResult(
         vessel_id=resolved_vessel_id,
         spacing_xyz=spacing,
-        method="spacing_weighted_exposed_voxel_faces_with_exterior_physical_edt",
+        method="spacing_weighted_exposed_voxel_faces_with_bounded_exterior_physical_edt",
         distances=results,
         qc_flags=tuple(sorted(global_flags)),
     )

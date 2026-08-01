@@ -135,11 +135,20 @@ def summarize_sectors(
     histogram_edges = np.asarray(attenuation_histogram_edges_hu, dtype=float)
     if histogram_edges.ndim != 1 or len(histogram_edges) < 2 or np.any(np.diff(histogram_edges) <= 0):
         raise ValueError("attenuation_histogram_edges_hu must be strictly increasing.")
+    # Only voxels assigned to a vessel sector can contribute to any output.
+    # Compact this sparse domain once so each band/sector/tissue summary does
+    # not rescan the full CTA volume.
+    domain = sectors > 0
+    compact_image = image[domain]
+    compact_tissues = tissues[domain]
+    compact_sectors = sectors[domain]
+    compact_valid = valid[domain]
+    compact_bands = {name: mask[domain] for name, mask in bands.items()}
     records: list[dict[str, object]] = []
-    for band_name, band_mask in bands.items():
+    for band_name, band_mask in compact_bands.items():
         for sector in range(1, assignment.number_of_sectors + 1):
-            total = band_mask & (sectors == sector)
-            assessed = total & valid
+            total = band_mask & (compact_sectors == sector)
+            assessed = total & compact_valid
             count = int(assessed.sum())
             record: dict[str, object] = {
                 "vessel_id": assignment.vessel_id,
@@ -165,13 +174,17 @@ def summarize_sectors(
                 TissueLabel.UNCERTAIN,
             ):
                 name = TISSUE_NAMES[int(label)]
-                label_count = int((assessed & (tissues == int(label))).sum())
+                label_count = int((assessed & (compact_tissues == int(label))).sum())
                 record[f"{name}_voxels"] = label_count
                 record[f"{name}_volume_mm3"] = float(label_count * voxel_volume)
                 record[f"{name}_fraction"] = float(label_count / count) if count else float("nan")
-            values = image[assessed & np.isfinite(image)]
+            values = compact_image[assessed & np.isfinite(compact_image)]
             record.update(_statistics(values, "cta"))
-            fat_values = image[assessed & (tissues == int(TissueLabel.ADIPOSE)) & np.isfinite(image)]
+            fat_values = compact_image[
+                assessed
+                & (compact_tissues == int(TissueLabel.ADIPOSE))
+                & np.isfinite(compact_image)
+            ]
             record.update(_statistics(fat_values, "fat"))
             histogram, _ = np.histogram(values, bins=histogram_edges)
             record["attenuation_histogram_edges_hu"] = histogram_edges.tolist()

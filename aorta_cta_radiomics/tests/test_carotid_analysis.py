@@ -200,6 +200,34 @@ def test_synthetic_flowcat_carotid_runs_all_first_milestone_components():
         sample.sector_measurements["longitudinal_intervals"] == []
         for sample in result.sample_outputs
     )
+    # The production implementation compacts finite vessel-coordinate voxels
+    # once.  Verify its sample summaries against the direct full-grid formula.
+    sample_index = len(result.sample_outputs) // 2
+    sample = result.sample_outputs[sample_index]
+    path_map = branch.sector_assignment.path_mm
+    slab = np.isfinite(path_map) & (
+        np.abs(path_map - sample.path_distance_mm) <= 0.5
+    )
+    for name, mask in branch.fixed_shells.filtered_masks.items():
+        selected = slab & mask
+        valid = selected & branch.composition.valid_denominator_mask
+        fat = valid & branch.composition.mask(TissueLabel.ADIPOSE)
+        record = sample.radial_band_measurements[name]
+        assert record["voxels"] == int(selected.sum())
+        assert record["valid_voxels"] == int(valid.sum())
+        expected_fraction = float(fat.sum() / valid.sum()) if valid.any() else None
+        assert record["fat_fraction"] == expected_fraction
+    for sector in range(1, branch.sector_assignment.number_of_sectors + 1):
+        selected = (
+            slab
+            & (branch.sector_assignment.labels == sector)
+            & branch.composition.valid_denominator_mask
+        )
+        fat = selected & branch.composition.mask(TissueLabel.ADIPOSE)
+        record = sample.sector_measurements["sectors"][str(sector)]
+        assert record["valid_voxels"] == int(selected.sum())
+        expected_fraction = float(fat.sum() / selected.sum()) if selected.any() else None
+        assert record["fat_fraction"] == expected_fraction
     assert result.case_output.cta_metadata["array_order_input"] == "nibabel_ijk"
     assert result.case_output.cta_metadata["array_order_analysis"] == "perivascular_kji_zyx"
     assert result.case_output.processing_status == "partial_missing_optional_context"

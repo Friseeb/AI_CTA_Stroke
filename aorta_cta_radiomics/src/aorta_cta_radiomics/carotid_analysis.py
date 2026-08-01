@@ -453,20 +453,18 @@ def _union(masks: Mapping[str, np.ndarray], shape: tuple[int, ...]) -> np.ndarra
 
 
 def _local_band_measurements(
-    path_mm: float,
-    half_width_mm: float,
-    path_map: np.ndarray,
+    local_roi: np.ndarray,
     fixed_masks: Mapping[str, np.ndarray],
-    composition: CompositionResult,
-    cta_zyx: np.ndarray,
+    valid_denominator: np.ndarray,
+    tissue_labels: np.ndarray,
+    cta_values: np.ndarray,
 ) -> dict[str, object]:
-    slab = np.isfinite(path_map) & (np.abs(path_map - path_mm) <= half_width_mm)
     records: dict[str, object] = {}
     for name, mask in fixed_masks.items():
-        selected = slab & mask
-        valid = selected & composition.valid_denominator_mask
-        fat = valid & (composition.labels == int(TissueLabel.ADIPOSE))
-        fat_values = cta_zyx[fat]
+        selected = local_roi & mask
+        valid = selected & valid_denominator
+        fat = valid & (tissue_labels == int(TissueLabel.ADIPOSE))
+        fat_values = cta_values[fat]
         records[name] = {
             "voxels": int(selected.sum()),
             "valid_voxels": int(valid.sum()),
@@ -478,18 +476,17 @@ def _local_band_measurements(
 
 def _local_sector_measurements(
     path_mm: float,
-    half_width_mm: float,
+    local_roi: np.ndarray,
+    sector_labels: np.ndarray,
+    valid_denominator: np.ndarray,
+    tissue_labels: np.ndarray,
     assignment: SectorAssignment,
-    composition: CompositionResult,
     interval: SupportedBulbInterval | None,
 ) -> dict[str, object]:
-    slab = np.isfinite(assignment.path_mm) & (
-        np.abs(assignment.path_mm - path_mm) <= half_width_mm
-    )
     sectors: dict[str, object] = {}
     for sector in range(1, assignment.number_of_sectors + 1):
-        selected = slab & (assignment.labels == sector) & composition.valid_denominator_mask
-        fat = selected & (composition.labels == int(TissueLabel.ADIPOSE))
+        selected = local_roi & (sector_labels == sector) & valid_denominator
+        fat = selected & (tissue_labels == int(TissueLabel.ADIPOSE))
         sectors[str(sector)] = {
             "valid_voxels": int(selected.sum()),
             "fat_fraction": float(fat.sum() / selected.sum()) if selected.any() else None,
@@ -585,22 +582,34 @@ def _build_output_records(
             *(code for report in qc_reports for code in report.codes),
         }
     )
+    # Sample-level summaries only query voxels with a finite vessel coordinate.
+    # Compact those arrays once instead of scanning the full CTA grid for every
+    # 1-mm centreline sample and every radial band/sector.
+    sample_domain = np.isfinite(assignment.path_mm)
+    sample_paths = np.asarray(assignment.path_mm[sample_domain], dtype=float)
+    sample_valid_denominator = np.asarray(
+        composition.valid_denominator_mask[sample_domain], dtype=bool
+    )
+    sample_tissue_labels = np.asarray(composition.labels[sample_domain])
+    sample_cta_values = np.asarray(cta_zyx[sample_domain])
+    sample_fixed_masks = {
+        name: np.asarray(mask[sample_domain], dtype=bool)
+        for name, mask in fixed_shells.filtered_masks.items()
+    }
+    sample_sector_labels = np.asarray(assignment.labels[sample_domain])
     for index, path_mm in enumerate(system.path_mm):
+        local_roi = np.abs(sample_paths - path_mm) <= half_width
         radial = _local_band_measurements(
-            float(path_mm),
-            half_width,
-            assignment.path_mm,
-            fixed_shells.filtered_masks,
-            composition,
-            cta_zyx,
+            local_roi,
+            sample_fixed_masks,
+            sample_valid_denominator,
+            sample_tissue_labels,
+            sample_cta_values,
         )
-        local_roi = np.isfinite(assignment.path_mm) & (
-            np.abs(assignment.path_mm - path_mm) <= half_width
-        )
-        valid_count = int((local_roi & composition.valid_denominator_mask).sum())
+        valid_count = int((local_roi & sample_valid_denominator).sum())
         sample_valid[index] = valid_count > 0
         uncertain_count = int(
-            (local_roi & (composition.labels == int(TissueLabel.UNCERTAIN))).sum()
+            (local_roi & (sample_tissue_labels == int(TissueLabel.UNCERTAIN))).sum()
         )
         roi_count = int(local_roi.sum())
         uncertain_fraction = float(uncertain_count / roi_count) if roi_count else None
@@ -638,7 +647,13 @@ def _build_output_records(
                 ),
                 radial_band_measurements=radial,
                 sector_measurements=_local_sector_measurements(
-                    float(path_mm), half_width, assignment, composition, bulb_interval
+                    float(path_mm),
+                    local_roi,
+                    sample_sector_labels,
+                    sample_valid_denominator,
+                    sample_tissue_labels,
+                    assignment,
+                    bulb_interval,
                 ),
                 surface_contact_measurements=_local_contact_measurements(
                     float(path_mm), contacts, config.primary_contact_distance_mm

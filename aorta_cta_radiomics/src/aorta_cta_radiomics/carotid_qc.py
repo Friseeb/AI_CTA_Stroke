@@ -58,6 +58,7 @@ def run_carotid_qc(
     shell_path: str | os.PathLike[str] | None = None,
     tissue_path: str | os.PathLike[str] | None = None,
     calcium_path: str | os.PathLike[str] | None = None,
+    focus_overlay: str | None = None,
 ) -> dict[str, Any]:
     """Validate inputs, render a three-plane montage, and write QC JSON.
 
@@ -147,10 +148,35 @@ def run_carotid_qc(
             raise CarotidQCError(f"Canonical {name} display geometry is incompatible: {exc}") from exc
         display_overlays[name] = _Overlay(name=name, data=display_data, metrics=overlay.metrics)
 
+    supported_focus_overlays = {
+        "segmentation",
+        "labelled_artery",
+        "shell",
+        "tissue",
+        "calcium",
+    }
+    if focus_overlay is not None and focus_overlay not in supported_focus_overlays:
+        raise CarotidQCError(
+            f"Unsupported focus overlay {focus_overlay!r}; expected one of "
+            f"{sorted(supported_focus_overlays)}"
+        )
+    if focus_overlay == "segmentation":
+        focus_data = display_segmentation
+    elif focus_overlay is None:
+        focus_data = None
+    else:
+        focused = display_overlays.get(focus_overlay)
+        if focused is None:
+            raise CarotidQCError(
+                f"Requested focus overlay {focus_overlay!r} was not provided"
+            )
+        focus_data = focused.data
     selection, selection_record = _display_slice_selection(
         display_segmentation,
         display_geometry=display_geometry,
         original_geometry=cta_geometry,
+        focus_ras=focus_data,
+        focus_name=focus_overlay,
     )
     window = _display_window(display_cta)
     output_directory.mkdir(parents=True, exist_ok=True)
@@ -165,6 +191,7 @@ def run_carotid_qc(
         spacing_mm=display_geometry.spacing_mm,
         case_id=case_id,
         output_path=montage_path,
+        selection_record=selection_record,
     )
 
     named_overlay_available = overlay_availability["labelled_artery"]
@@ -308,6 +335,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--shell", "--shell-nifti", "--shell-mask", dest="shell")
     parser.add_argument("--tissue", "--tissue-nifti", "--tissue-mask", dest="tissue")
     parser.add_argument("--calcium", "--calcium-nifti", "--calcium-mask", dest="calcium")
+    parser.add_argument(
+        "--focus-overlay",
+        choices=("segmentation", "labelled_artery", "shell", "tissue", "calcium"),
+        help=(
+            "Center all three planes on a supplied overlay foreground voxel. "
+            "Omit for the anatomy-neutral superior whole-tree overview."
+        ),
+    )
     args = parser.parse_args(argv)
     try:
         report = run_carotid_qc(
@@ -320,6 +355,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             shell_path=args.shell,
             tissue_path=args.tissue,
             calcium_path=args.calcium,
+            focus_overlay=args.focus_overlay,
         )
     except (CarotidQCError, OSError, ValueError) as exc:
         json.dump(
@@ -564,28 +600,73 @@ def _display_slice_selection(
     display_geometry: ImageGeometry,
     original_geometry: ImageGeometry,
     superior_percentile: float = 0.85,
+    focus_ras: np.ndarray | None = None,
+    focus_name: str | None = None,
 ) -> tuple[tuple[int, int, int], dict[str, Any]]:
-    """Choose a superior whole-tree context slice without inferring anatomy."""
+    """Choose an anatomy-neutral overview or an explicitly supplied overlay focus."""
 
-    occupied_k = np.flatnonzero(segmentation_ras.any(axis=(0, 1)))
+    focus = None if focus_ras is None else np.asarray(focus_ras != 0, dtype=bool)
+    if focus is not None and focus.shape != segmentation_ras.shape:
+        raise CarotidQCError("Focus overlay does not share the canonical display shape")
+    focused_coordinates = np.argwhere(focus) if focus is not None else np.empty((0, 3), int)
+    if focus is not None and len(focused_coordinates):
+        spacing = np.asarray(display_geometry.spacing_mm, dtype=float)
+        median = np.median(focused_coordinates, axis=0)
+        physical_squared_distance = np.square(
+            (focused_coordinates - median) * spacing[None, :]
+        ).sum(axis=1)
+        selected = focused_coordinates[int(np.argmin(physical_squared_distance))]
+        selection = tuple(int(value) for value in selected)
+        occupied_k = np.flatnonzero(focus.any(axis=(0, 1)))
+        method = "provided_overlay_foreground_voxel_nearest_physical_median"
+        percentile_value = None
+        percentile_basis = None
+        purpose = f"provided {focus_name} overlay focus for visual QC"
+        anatomical_claim = "focus_from_provided_overlay_not_inferred_anatomy"
+        in_plane_selection = "foreground_voxel_nearest_3d_physical_median"
+        selection_mask = focus
+        display_context = (
+            f"provided {focus_name} overlay focus; location supplied by caller, not anatomically inferred"
+        )
+        axial_title = f"Axial — {focus_name} overlay focus"
+    else:
+        occupied_k = np.flatnonzero(segmentation_ras.any(axis=(0, 1)))
+        selection_mask = segmentation_ras
+        purpose = "superior whole-tree arterial context for visual QC"
+        anatomical_claim = "not_a_named_carotid_localization"
+        in_plane_selection = (
+            "foreground_voxel_nearest_slice_median" if len(occupied_k) else "image_midpoint"
+        )
+        display_context = "superior whole-tree context (not a named-carotid localization)"
+        axial_title = "Axial — superior arterial context"
+    if focus is None or not len(focused_coordinates):
+        if focus is not None and not len(focused_coordinates):
+            purpose = f"empty provided {focus_name} overlay; fallback to whole-tree context"
+            anatomical_claim = "empty_focus_overlay_fallback_not_anatomical_localization"
+            display_context = (
+                f"empty provided {focus_name} overlay; superior whole-tree fallback"
+            )
+        if len(occupied_k) == 0:
+            selection = tuple(int(size // 2) for size in segmentation_ras.shape)
+            method = "image_midpoint_empty_segmentation"
+            percentile_value = None
+            percentile_basis = None
+        else:
+            # An unweighted percentile of occupied slices prevents a large thoracic
+            # aorta cross-section from dominating a foreground-voxel quantile.
+            rank = int(round((len(occupied_k) - 1) * superior_percentile))
+            k = int(occupied_k[rank])
+            in_plane = np.argwhere(segmentation_ras[:, :, k])
+            median_ij = np.median(in_plane, axis=0)
+            squared_distance = np.square(in_plane - median_ij).sum(axis=1)
+            selected_ij = in_plane[int(np.argmin(squared_distance))]
+            selection = (int(selected_ij[0]), int(selected_ij[1]), k)
+            method = "superior_arterial_context_occupied_slice_percentile"
+            percentile_value = superior_percentile
+            percentile_basis = "unweighted_axial_slices_with_whole_tree_foreground"
+
     if len(occupied_k) == 0:
         selection = tuple(int(size // 2) for size in segmentation_ras.shape)
-        method = "image_midpoint_empty_segmentation"
-        percentile_value: float | None = None
-        percentile_basis = None
-    else:
-        # An unweighted percentile of occupied slices prevents a large thoracic
-        # aorta cross-section from dominating a foreground-voxel quantile.
-        rank = int(round((len(occupied_k) - 1) * superior_percentile))
-        k = int(occupied_k[rank])
-        in_plane = np.argwhere(segmentation_ras[:, :, k])
-        median_ij = np.median(in_plane, axis=0)
-        squared_distance = np.square(in_plane - median_ij).sum(axis=1)
-        selected_ij = in_plane[int(np.argmin(squared_distance))]
-        selection = (int(selected_ij[0]), int(selected_ij[1]), k)
-        method = "superior_arterial_context_occupied_slice_percentile"
-        percentile_value = superior_percentile
-        percentile_basis = "unweighted_axial_slices_with_whole_tree_foreground"
 
     display_affine = np.asarray(display_geometry.affine_ras_mm, dtype=float)
     original_affine = np.asarray(original_geometry.affine_ras_mm, dtype=float)
@@ -595,20 +676,23 @@ def _display_slice_selection(
     original_nearest = np.clip(original_nearest, 0, np.asarray(original_geometry.shape_ijk) - 1)
     selected_k = selection[2]
     record = {
-        "purpose": "superior whole-tree arterial context for visual QC",
-        "anatomical_claim": "not_a_named_carotid_localization",
+        "purpose": purpose,
+        "anatomical_claim": anatomical_claim,
         "method": method,
+        "focus_overlay": focus_name,
         "superior_percentile": percentile_value,
         "percentile_basis": percentile_basis,
-        "superior_direction": "increasing canonical RAS k (S)",
+        "superior_direction": (
+            "increasing canonical RAS k (S)" if focus is None else None
+        ),
         "occupied_axial_slice_count": int(len(occupied_k)),
-        "selected_axial_foreground_voxels": int(segmentation_ras[:, :, selected_k].sum()),
+        "selected_axial_foreground_voxels": int(selection_mask[:, :, selected_k].sum()),
         "canonical_voxel_ijk": list(selection),
         "original_voxel_ijk_nearest": [int(value) for value in original_nearest],
         "physical_ras_mm": [float(value) for value in physical_ras],
-        "in_plane_selection": (
-            "foreground_voxel_nearest_slice_median" if len(occupied_k) else "image_midpoint"
-        ),
+        "in_plane_selection": in_plane_selection,
+        "display_context": display_context,
+        "axial_title": axial_title,
     }
     return selection, record
 
@@ -634,10 +718,11 @@ def _write_montage(
     spacing_mm: tuple[float, float, float],
     case_id: str,
     output_path: Path,
+    selection_record: Mapping[str, Any],
 ) -> None:
     planes = (
         (
-            "Axial — superior arterial context",
+            str(selection_record["axial_title"]),
             2,
             selection[2],
             spacing_mm[1] / spacing_mm[0],
@@ -686,7 +771,7 @@ def _write_montage(
     )
     figure.suptitle(
         f"Carotid pipeline QC — {case_id} — visual review pending\n"
-        "Canonical RAS display; superior whole-tree context (not a named-carotid localization)"
+        f"Canonical RAS display; {selection_record['display_context']}"
     )
     figure.savefig(output_path, dpi=150, facecolor="white")
     plt.close(figure)
