@@ -10,6 +10,7 @@ dependencies:
   - scikit-learn
   - simpleitk
   - nibabel
+  - networkx>=3
   - pyyaml
   - typer
   - tqdm
@@ -20,10 +21,11 @@ dependencies:
   - pip:
       - --no-build-isolation
       - pyradiomics==3.0.1
-      - -e .
 
 # Optional, install only when needed:
-#   conda install -c conda-forge pyvista trimesh
+#   conda install -c conda-forge vtk pyvista trimesh pyarrow
 #   pip install monai torch
+# Workspace packages are installed explicitly after environment creation:
+#   pip install -e ../cta_common -e .[dev,table]
 # On macOS, if torch reports duplicate OpenMP runtimes:
 #   export KMP_DUPLICATE_LIB_OK=TRUE

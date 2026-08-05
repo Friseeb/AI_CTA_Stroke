@@ -1,0 +1,101 @@
+schema_version: 1
+analysis_name: carotid_perivascular_microenvironment_milestone_1
+research_use_only: true
+
+flowcat:
+  repository: "https://github.com/FLOWCAT-CV/arterial"
+  branch: "models/2026-03"
+  commit: "1991ca5b238d7c868c9c3a0a390057bc89aee559"
+  require_native_centerline_segments: true
+  require_anatomical_graph: true
+  trusted_pickle_opt_in: false
+  target_labels: [RCCA, LCCA, RICA, LICA]
+  context_labels: [AA, BT, RSA, LSA, RVA, LVA, RECA, LECA, BA, other]
+
+coordinate_system:
+  sample_spacing_mm: 1.0
+  frame: parallel_transport
+  absolute_orientation: RAS_when_affine_valid
+  bifurcation_exclusion_mm: 3.0
+  endpoint_exclusion_mm: 2.0
+
+label_propagation:
+  primary: branch_aware_connected
+  comparator: nearest_labelled_centerline
+  uncertain_label: 14
+  radius_factor: 1.75
+  radius_margin_mm: 0.75
+  tie_tolerance_mm: 0.35
+  minimum_confidence: 0.05
+
+radial_shells:
+  bands_mm:
+    - {name: radial_0_1mm, inner_mm: 0.0, outer_mm: 1.0}
+    - {name: radial_1_2mm, inner_mm: 1.0, outer_mm: 2.0}
+    - {name: radial_2_3mm, inner_mm: 2.0, outer_mm: 3.0}
+    - {name: radial_3_5mm, inner_mm: 3.0, outer_mm: 5.0}
+    - {name: radial_5_10mm, inner_mm: 5.0, outer_mm: 10.0}
+  compatibility_bands_mm:
+    - {name: radial_0_2mm, inner_mm: 0.0, outer_mm: 2.0}
+    - {name: radial_2_5mm, inner_mm: 2.0, outer_mm: 5.0}
+  partial_volume_exclusion_mm: 0.0
+  exclude_other_arteries: true
+  preserve_raw_and_filtered: true
+
+adaptive_envelope:
+  equation: "t_j(s) = clip(alpha_j * D_ref(s), t_min_j, t_max_j)"
+  diameter_method: "2 * local MaximumInscribedSphereRadius; never an outer-wall diameter"
+  resolution_floor: "2 * max(native voxel spacing)"
+  fat:
+    alpha: 1.0
+    minimum_mm: resolution_floor
+    maximum_mm: 5.0
+  calcium:
+    alpha: 0.25
+    minimum_mm: resolution_floor
+    maximum_mm: 2.0
+
+tissue_composition:
+  overlap_priority:
+    - target_artery
+    - other_artery
+    - vein
+    - bone
+    - airway
+    - thyroid_or_gland
+    - skeletal_muscle
+    - high_density_contamination
+    - adipose_tissue
+    - other_nonfat_soft_tissue
+    - uncertain_or_nonassessable
+  fat_windows_hu:
+    primary: [-190, -30]
+    narrow_sensitivity: [-150, -50]
+    wide_sensitivity: [-200, -20]
+  high_density_hu: 300
+  nonfinite_is_nonassessable: true
+
+sectors:
+  counts: [8, 16, 32]
+  primary_count: 16
+  angle_zero: "first parallel-transport normal initialized from RAS anterior when stable"
+
+surface_contact:
+  distances_mm: [0.5, 1.0, 2.0]
+  primary_distance_mm: 1.0
+
+output:
+  nifti_masks: true
+  json_manifests: true
+  parquet_tables: true
+  csv_fallback_if_pyarrow_missing: true
+  preserve_sample_point_profiles: true
+  minimum_radiomics_voxels: 64
+
+qc:
+  maximum_uncertain_fraction: 0.25
+  maximum_bone_contamination_fraction: 0.25
+  maximum_vein_contamination_fraction: 0.40
+  minimum_intravascular_contrast_hu: 150
+  require_visual_review: true
+  visual_review_state_before_review: automated_pass_visual_pending
