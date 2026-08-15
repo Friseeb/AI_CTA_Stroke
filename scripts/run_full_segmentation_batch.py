@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import csv
 import subprocess
+import sys
 from pathlib import Path
 from typing import Dict
 
@@ -41,7 +42,7 @@ def _build_case_cmd(args: argparse.Namespace, row: Dict[str, str]) -> list[str]:
 
     case_out = Path(args.output_root) / case_id
     cmd = [
-        "python",
+        sys.executable,
         str(Path(__file__).parent / "run_full_segmentation_pipeline.py"),
         "--output-dir",
         str(case_out),
@@ -92,8 +93,16 @@ def _build_case_cmd(args: argparse.Namespace, row: Dict[str, str]) -> list[str]:
     if args.skip_merge:
         cmd.append("--skip-merge")
 
+    if args.totalseg_fast:
+        cmd.append("--totalseg-fast")
+    if args.totalseg_ml:
+        cmd.append("--totalseg-ml")
+    if args.skip_headneck:
+        cmd.append("--skip-headneck")
+
     # Env routing
-    cmd += ["--totalseg-env", args.totalseg_env]
+    if args.totalseg_env:
+        cmd += ["--totalseg-env", args.totalseg_env]
     cmd += ["--topcow-env", args.topcow_env]
     cmd += ["--nv-env", args.nv_env]
     cmd += ["--nudf-env", args.nudf_env]
@@ -111,12 +120,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--nifti-field", default="input_nifti", help="Manifest column for input NIfTI")
     p.add_argument("--limit", type=int, default=None, help="Limit number of cases")
     p.add_argument("--dry-run", action="store_true", help="Print commands only")
+    p.add_argument("--continue-on-error", action="store_true", help="Log failures and continue instead of stopping")
+    p.add_argument("--skip-existing", action="store_true", help="Skip cases whose output dir already contains totalseg outputs")
 
     p.add_argument("--deface", action="store_true", help="Run defacing")
     p.add_argument("--skip-deface", action="store_true", help="Skip defacing")
 
     p.add_argument("--run-totalseg", action="store_true", help="Run TotalSegmentator tasks")
     p.add_argument("--skip-totalseg", action="store_true", help="Skip TotalSegmentator tasks")
+    p.add_argument("--totalseg-fast", action="store_true", help="Use TotalSegmentator fast (3mm) mode")
+    p.add_argument("--totalseg-ml", action="store_true", help="Save TotalSegmentator output as multilabel file")
+    p.add_argument("--skip-headneck", action="store_true", help="Skip headneck_bones_vessels task")
 
     p.add_argument("--run-topcow", action="store_true", help="Run TopCoW (Circle of Willis)")
     p.add_argument("--skip-topcow", action="store_true", help="Skip TopCoW")
@@ -135,7 +149,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--skip-merge", action="store_true", help="Skip merged label map")
 
     # Env routing
-    p.add_argument("--totalseg-env", default="totalseg-mac", help="Conda env for TotalSegmentator")
+    p.add_argument("--totalseg-env", default=None, help="Conda env for TotalSegmentator (None = use active env)")
     p.add_argument("--topcow-env", default="topcow_claim", help="Conda env for TopCoW")
     p.add_argument("--nv-env", default="nv-segment-ct", help="Conda env for NV-Segment-CT")
     p.add_argument("--nudf-env", default="cardiac-ct-explorer", help="Conda env for NUDF")
@@ -149,19 +163,39 @@ def main() -> int:
     if not manifest.exists():
         raise FileNotFoundError(f"Manifest not found: {manifest}")
 
+    failed: list[str] = []
     with manifest.open() as f:
         reader = csv.DictReader(f)
         for idx, row in enumerate(reader):
             if args.limit is not None and idx >= args.limit:
                 break
+            case_id = row.get(args.id_field, "").strip()
+            if args.skip_existing and case_id:
+                case_out = Path(args.output_root) / case_id
+                has_total = (case_out / "totalseg_total.nii.gz").exists() or (case_out / "totalseg_total.nii").exists()
+                has_heart = (case_out / "totalseg_heartchambers_highres.nii.gz").exists() or (case_out / "totalseg_heartchambers_highres.nii").exists()
+                if has_total and has_heart:
+                    print(f"SKIP: {case_id} already complete.")
+                    continue
             cmd = _build_case_cmd(args, row)
             if args.dry_run:
                 print("DRY RUN:", " ".join(cmd))
                 continue
-            _run(cmd)
+            try:
+                _run(cmd)
+            except subprocess.CalledProcessError as exc:
+                case_id = row.get(args.id_field, f"row{idx}")
+                if args.continue_on_error:
+                    print(f"ERROR: {case_id} failed (exit {exc.returncode}); continuing.")
+                    failed.append(case_id)
+                else:
+                    raise
 
-    print("Done.")
-    return 0
+    if failed:
+        print(f"Completed with {len(failed)} failure(s): {', '.join(failed)}")
+    else:
+        print("Done.")
+    return len(failed)
 
 
 if __name__ == "__main__":

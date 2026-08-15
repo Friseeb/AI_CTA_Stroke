@@ -10,7 +10,8 @@ import pandas as pd
 from . import __version__
 from .calcification import _lumen_core_mask, _slice_lumen_reference_hu, _smooth_profile
 from .features import feature_row
-from .shells import _crop_around_mask, _sampling_zyx, external_shell
+from .gpu_ndimage import binary_closing, binary_fill_holes, distance_transform_edt, label
+from .shells import _crop_around_mask, _sampling_zyx, create_aorta_wall_band_masks, external_shell
 
 
 @dataclass
@@ -49,6 +50,8 @@ def extract_fat_closed_aortic_wall(
     exclude_fat_from_wall: bool = True,
     exclude_calcification_hu: float | None = None,
     include_calcification_in_wall: bool = True,
+    calcium_wall_internal_mm: float = 2.0,
+    calcium_wall_external_mm: float = 2.0,
     lumen_correction_enabled: bool = False,
     lumen_correction_outer_mm: float = 2.0,
     lumen_correction_close_radius_mm: float = 1.0,
@@ -162,10 +165,23 @@ def extract_fat_closed_aortic_wall(
     wall &= image_array <= float(wall_hu_max)
     if exclude_calcification_hu is not None and not bool(include_calcification_in_wall):
         wall &= image_array < float(exclude_calcification_hu)
+    # Build the non-calcified wall first, then deliberately append calcium from
+    # the boundary wall band. This prevents broad contrast/lumen leakage while
+    # preserving wall-adjacent calcification as part of the wall ROI.
+    wall &= ~aorta
+    if exclude_calcification_hu is not None and bool(include_calcification_in_wall):
+        calcium_wall_band = create_aorta_wall_band_masks(
+            aorta,
+            spacing_xyz,
+            internal_mm=float(calcium_wall_internal_mm),
+            external_mm=float(calcium_wall_external_mm),
+        )["aorta_wall_band"]
+        calcium_wall = (image_array >= float(exclude_calcification_hu)) & calcium_wall_band & ~lumen
+        wall |= calcium_wall
     hu_refined_aorta = lumen | wall
 
     labelmap = np.zeros_like(aorta, dtype=np.uint8)
-    labelmap[closed_outer] = 4
+    labelmap[closed_outer & ~aorta] = 4
     labelmap[fat_support] = 3
     labelmap[wall] = 2
     labelmap[lumen] = 1
@@ -280,15 +296,10 @@ def _correct_lumen_with_hu_threshold(
     close_radius = max(float(close_radius_mm), 0.0)
     if close_radius <= 0 or not candidate.any():
         return candidate | seed
-    try:
-        from scipy import ndimage as ndi
-    except Exception as exc:
-        raise ImportError("SciPy ndimage is required for HU lumen correction.") from exc
-
     cropped_roi, slices = _crop_around_mask(roi | seed, spacing_xyz, margin_mm=close_radius)
     candidate_crop = candidate[slices]
     footprint = _physical_ball_footprint(spacing_xyz, close_radius)
-    corrected_crop = ndi.binary_closing(candidate_crop, structure=footprint) | candidate_crop
+    corrected_crop = binary_closing(candidate_crop, structure=footprint) | candidate_crop
     corrected_crop &= cropped_roi
     corrected = np.zeros_like(candidate, dtype=bool)
     corrected[slices] = corrected_crop
@@ -330,15 +341,10 @@ def _slice_centerline_core_mask(
     core = np.zeros_like(aorta, dtype=bool)
     if not aorta.any():
         return core
-    try:
-        from scipy import ndimage as ndi
-    except Exception as exc:
-        raise ImportError("SciPy ndimage is required for slice centerline-core HU estimation.") from exc
-
     sampling_yx = (float(spacing_xyz[1]), float(spacing_xyz[0]))
     radius = max(float(centerline_core_radius_mm), float(min(sampling_yx)))
     for z in np.flatnonzero(aorta.any(axis=(1, 2))):
-        distance = ndi.distance_transform_edt(aorta[z], sampling=sampling_yx)
+        distance = distance_transform_edt(aorta[z], sampling=sampling_yx)
         max_distance = float(distance.max())
         if max_distance <= 0:
             continue
@@ -364,13 +370,8 @@ def _closed_outer_envelope(
     cropped_roi, slices = _crop_around_mask(analysis_roi, spacing_xyz, margin_mm=close_radius)
     seed_crop = seed[slices]
     footprint = _physical_ball_footprint(spacing_xyz, close_radius)
-    try:
-        from scipy import ndimage as ndi
-
-        closed_crop = ndi.binary_closing(seed_crop, structure=footprint) | seed_crop
-        closed_crop = ndi.binary_fill_holes(closed_crop)
-    except Exception as exc:
-        raise ImportError("SciPy ndimage is required for fat-closed aortic wall candidate masks.") from exc
+    closed_crop = binary_closing(seed_crop, structure=footprint) | seed_crop
+    closed_crop = binary_fill_holes(closed_crop)
 
     closed = np.zeros_like(seed, dtype=bool)
     closed[slices] = closed_crop & cropped_roi
@@ -396,19 +397,14 @@ def _keep_components_touching(mask: np.ndarray, seed: np.ndarray) -> np.ndarray:
     seed_binary = np.asarray(seed, dtype=bool)
     if not binary.any():
         return binary
-    try:
-        from scipy import ndimage as ndi
-
-        labels, n_labels = ndi.label(binary, structure=np.ones((3, 3, 3), dtype=bool))
-        if n_labels == 0:
-            return np.zeros_like(binary, dtype=bool)
-        keep_labels = np.unique(labels[seed_binary & binary])
-        keep_labels = keep_labels[keep_labels > 0]
-        if keep_labels.size == 0:
-            return np.zeros_like(binary, dtype=bool)
-        return np.isin(labels, keep_labels)
-    except Exception as exc:
-        raise ImportError("SciPy ndimage is required for connected component filtering.") from exc
+    labels, n_labels = label(binary, structure=np.ones((3, 3, 3), dtype=bool))
+    if n_labels == 0:
+        return np.zeros_like(binary, dtype=bool)
+    keep_labels = np.unique(labels[seed_binary & binary])
+    keep_labels = keep_labels[keep_labels > 0]
+    if keep_labels.size == 0:
+        return np.zeros_like(binary, dtype=bool)
+    return np.isin(labels, keep_labels)
 
 
 def _summarize(

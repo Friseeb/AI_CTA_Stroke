@@ -46,3 +46,32 @@ cohort_generation/outputs/*
 tmp_*
 *.tmp
 *.log
+
+# ---------------------------------------------------------------------------
+# DATOS DE PACIENTES -- NUNCA COMMITEAR (este repo es PUBLICO)
+# Los exports de REDCap contienen `pin` y `full_name` de miles de pacientes.
+cohort_generation/
+reports/
+output/
+outputs/
+evt_extraction/output/
+**/output/v2/
+*.csv
+!**/templates/*.csv
+!**/examples/*.csv
+!configs/manifests/*.template.csv
+*.xlsx
+*.xls
+*.json
+!**/configs/*.json
+!**/*.template.json
+
+# Codigo de terceros y modelos (GB)
+external/
+*.pth
+*.pt
+*.zip
+
+# Notas de trabajo locales
+tmp/
+scratchpad/

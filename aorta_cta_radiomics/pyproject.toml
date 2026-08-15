@@ -30,9 +30,11 @@ dependencies = [
 [project.optional-dependencies]
 mesh = ["pyvista", "trimesh"]
 monai = ["monai", "torch"]
+fastrad = ["fastrad", "torch", "cupy-cuda13x; platform_system == 'Linux'"]
 encoders = ["torch", "transformers"]
 ct-fm = ["torch", "monai", "lighter-zoo"]
 all-encoders = ["torch", "transformers", "monai", "lighter-zoo"]
+all = ["fastrad", "torch", "cupy-cuda13x; platform_system == 'Linux'", "transformers", "monai", "lighter-zoo", "pyvista", "trimesh"]
 dev = ["pytest", "ruff"]
 
 [project.scripts]

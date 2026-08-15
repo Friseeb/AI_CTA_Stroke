@@ -94,6 +94,30 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Print environment versions and exit",
     )
+    p.add_argument(
+        "--overlap",
+        type=float,
+        default=0.3,
+        help="Sliding-window overlap fraction (default 0.3; reduce to 0.1 to save memory)",
+    )
+    p.add_argument(
+        "--sw-batch-size",
+        type=int,
+        default=1,
+        help="Sliding-window batch size (default 1)",
+    )
+    p.add_argument(
+        "--cpu-fallback",
+        action="store_true",
+        default=True,
+        help="Retry on CPU when CUDA OOM is detected (default True)",
+    )
+    p.add_argument(
+        "--no-cpu-fallback",
+        dest="cpu_fallback",
+        action="store_false",
+        help="Disable CPU fallback on OOM",
+    )
     return p.parse_args()
 
 
@@ -207,51 +231,79 @@ def main() -> int:
     if device.type == "mps" and not args.force_mps:
         print("MPS backend lacks ConvTranspose3D support for this model; falling back to CPU.")
         device = torch.device("cpu")
+
+    def _build_pipeline(dev):
+        pl = pipeline_helper.init_pipeline(
+            str(model_dir / "vista3d_pretrained_model"),
+            device=dev,
+        )
+        # Set sliding-window params directly on the inferer to avoid passing
+        # them through _forward_params where they would cause a TypeError in _forward().
+        if hasattr(pl, "inferer"):
+            if hasattr(pl.inferer, "overlap"):
+                pl.inferer.overlap = args.overlap
+            if hasattr(pl.inferer, "sw_batch_size"):
+                pl.inferer.sw_batch_size = args.sw_batch_size
+        return pl
+
+    def _is_oom(exc: Exception) -> bool:
+        """Walk the full exception chain — MONAI wraps OOM in RuntimeError."""
+        seen = set()
+        e: BaseException | None = exc
+        while e is not None and id(e) not in seen:
+            seen.add(id(e))
+            if isinstance(e, torch.OutOfMemoryError):
+                return True
+            if "out of memory" in str(e).lower():
+                return True
+            e = e.__cause__ or e.__context__
+        return False
+
     pipeline_helper = HuggingFacePipelineHelper("vista3d")
-    pipeline = pipeline_helper.init_pipeline(
-        str(model_dir / "vista3d_pretrained_model"),
-        device=device,
-    )
+    pipeline = _build_pipeline(device)
 
     label_id = int(args.label_id)
     inputs = [{"image": str(input_path), "label_prompt": [label_id]}]
     output_postfix = f"label{label_id}"
-    try:
-        pipeline(
+
+    def _run_pipeline(pl, dev):
+        pl(
             inputs,
             output_dir=str(work_dir),
             output_postfix=output_postfix,
             output_ext=".nii.gz",
             separate_folder=False,
-            amp=device.type == "cuda",
+            amp=dev.type == "cuda",
         )
+
+    try:
+        _run_pipeline(pipeline, device)
     except Exception as exc:  # noqa: BLE001
         msg = str(exc)
         if "mps" in msg.lower() and "float64" in msg.lower():
             print("MPS float64 unsupported in MONAI transforms; retrying on CPU.")
             device = torch.device("cpu")
-            pipeline = pipeline_helper.init_pipeline(
-                str(model_dir / "vista3d_pretrained_model"),
-                device=device,
-            )
-            pipeline(
-                inputs,
-                output_dir=str(work_dir),
-                output_postfix=output_postfix,
-                output_ext=".nii.gz",
-                separate_folder=False,
-                amp=False,
-            )
+            pipeline = _build_pipeline(device)
+            _run_pipeline(pipeline, device)
+        elif _is_oom(exc) and args.cpu_fallback and device.type != "cpu":
+            print(f"CUDA OOM ({type(exc).__name__}); clearing GPU cache and retrying on CPU.")
+            torch.cuda.empty_cache()
+            device = torch.device("cpu")
+            pipeline = _build_pipeline(device)
+            _run_pipeline(pipeline, device)
         elif "label prompt" in msg.lower() or "label_prompt" in msg.lower():
             inputs = [{"image": str(input_path), "label_prompt": [torch.tensor([label_id])]}]
-            pipeline(
-                inputs,
-                output_dir=str(work_dir),
-                output_postfix=output_postfix,
-                output_ext=".nii.gz",
-                separate_folder=False,
-                amp=device.type == "cuda",
-            )
+            try:
+                _run_pipeline(pipeline, device)
+            except Exception as exc2:  # noqa: BLE001
+                if _is_oom(exc2) and args.cpu_fallback and device.type != "cpu":
+                    print(f"CUDA OOM during label-prompt retry; falling back to CPU.")
+                    torch.cuda.empty_cache()
+                    device = torch.device("cpu")
+                    pipeline = _build_pipeline(device)
+                    _run_pipeline(pipeline, device)
+                else:
+                    raise
         else:
             raise
 

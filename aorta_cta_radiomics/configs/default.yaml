@@ -142,6 +142,8 @@ wall_from_fat:
 
 radiomics:
   enabled: true
+  backend: pyradiomics  # pyradiomics or fastrad
+  device: auto          # fastrad only: auto, cuda, cpu, or mps if supported
   settings_path: configs/radiomics.yaml
   regions:
     - aorta_mask

@@ -18,7 +18,7 @@ import pandas as pd
 
 
 ANATOMY_ALIASES: dict[str, list[str]] = {
-    "aorta": ["aorta", "aortic", "periaortic", "lumen_protrusion", "lumen_hu"],
+    "aorta": ["aorta", "aortic", "periaortic", "lumen_protrusion", "lumen_hu", "wall_thickness"],
     "carotid": ["carotid", "carotids", "cca", "ica"],
     "vertebral": ["vertebral", "vertebrals", "vert"],
     "artery": ["aorta", "aortic", "periaortic", "carotid", "vertebral", "artery", "arteries", "vessel"],
@@ -47,6 +47,21 @@ CATEGORY_COLORS: dict[str, tuple[float, float, float]] = {
     "protrusion": (0.78, 0.0, 0.2),
     "shape": (0.65, 0.35, 1.0),
     "other": (0.6, 0.6, 0.6),
+}
+
+WALL_THICKNESS_BIN_PALETTE: dict[int, tuple[str, tuple[float, float, float]]] = {
+    1: ("WT 0-2 mm", (0.20, 0.70, 1.00)),
+    2: ("WT 2-3 mm", (0.00, 0.85, 0.45)),
+    3: ("WT 3-4 mm", (1.00, 0.92, 0.20)),
+    4: ("WT 4-5 mm", (1.00, 0.50, 0.05)),
+    5: ("WT >=5 mm", (0.90, 0.05, 0.05)),
+}
+
+WALL_FROM_FAT_LABEL_PALETTE: dict[int, tuple[str, tuple[float, float, float]]] = {
+    1: ("Lumen", (0.00, 0.85, 1.00)),
+    2: ("Wall", (0.00, 0.75, 0.45)),
+    3: ("Fat support", (1.00, 0.95, 0.00)),
+    4: ("Outer closure", (0.55, 0.00, 1.00)),
 }
 
 
@@ -409,7 +424,7 @@ def write_slicer_scripts(records: list[MaskRecord], output_dir: str | Path) -> l
 
 
 def write_slicer_launcher(scripts: list[Path], output_dir: str | Path, case_index: int = 0) -> Path | None:
-    """Write a macOS shell launcher for the selected Slicer script."""
+    """Write a shell launcher for the selected Slicer script."""
     if not scripts:
         return None
     outdir = Path(output_dir)
@@ -424,21 +439,38 @@ set -euo pipefail
 SLICER_SCRIPT={str(script_path)!r}
 LOG_FILE="$(dirname "$SLICER_SCRIPT")/$(basename "$SLICER_SCRIPT" .py)_launch.log"
 
-if [[ -n "${{SLICER_APP:-}}" && -d "$SLICER_APP" ]]; then
+if [[ -n "${{SLICER_EXECUTABLE:-}}" && -x "$SLICER_EXECUTABLE" ]]; then
+  echo "Launching: $SLICER_EXECUTABLE --ignore-slicerrc --python-script $SLICER_SCRIPT"
+  echo "Log: $LOG_FILE"
+  "$SLICER_EXECUTABLE" --ignore-slicerrc --python-script "$SLICER_SCRIPT" >"$LOG_FILE" 2>&1 &
+elif [[ -x /opt/Slicer/Slicer ]]; then
+  echo "Launching: /opt/Slicer/Slicer --ignore-slicerrc --python-script $SLICER_SCRIPT"
+  echo "Log: $LOG_FILE"
+  /opt/Slicer/Slicer --ignore-slicerrc --python-script "$SLICER_SCRIPT" >"$LOG_FILE" 2>&1 &
+elif command -v Slicer >/dev/null 2>&1; then
+  echo "Launching: Slicer --ignore-slicerrc --python-script $SLICER_SCRIPT"
+  echo "Log: $LOG_FILE"
+  Slicer --ignore-slicerrc --python-script "$SLICER_SCRIPT" >"$LOG_FILE" 2>&1 &
+elif [[ -n "${{SLICER_APP:-}}" && -d "$SLICER_APP" ]]; then
   SLICER_APP_PATH="$SLICER_APP"
+  echo "Launching: open -n -a $SLICER_APP_PATH --args --ignore-slicerrc --python-script $SLICER_SCRIPT"
+  echo "Log: $LOG_FILE"
+  open -n -a "$SLICER_APP_PATH" --args --ignore-slicerrc --python-script "$SLICER_SCRIPT" >"$LOG_FILE" 2>&1
 elif [[ -d /Applications/Slicer.app ]]; then
   SLICER_APP_PATH="/Applications/Slicer.app"
+  echo "Launching: open -n -a $SLICER_APP_PATH --args --ignore-slicerrc --python-script $SLICER_SCRIPT"
+  echo "Log: $LOG_FILE"
+  open -n -a "$SLICER_APP_PATH" --args --ignore-slicerrc --python-script "$SLICER_SCRIPT" >"$LOG_FILE" 2>&1
 else
   SLICER_APP_PATH="$(find /Applications -maxdepth 1 -name 'Slicer*.app' -type d | sort | tail -n 1)"
   if [[ -z "$SLICER_APP_PATH" ]]; then
-    echo "Could not find 3D Slicer.app. Set SLICER_APP=/path/to/Slicer.app and retry." >&2
+    echo "Could not find 3D Slicer. Set SLICER_EXECUTABLE=/path/to/Slicer or SLICER_APP=/path/to/Slicer.app and retry." >&2
     exit 1
   fi
+  echo "Launching: open -n -a $SLICER_APP_PATH --args --ignore-slicerrc --python-script $SLICER_SCRIPT"
+  echo "Log: $LOG_FILE"
+  open -n -a "$SLICER_APP_PATH" --args --ignore-slicerrc --python-script "$SLICER_SCRIPT" >"$LOG_FILE" 2>&1
 fi
-
-echo "Launching: open -n -a $SLICER_APP_PATH --args --ignore-slicerrc --python-script $SLICER_SCRIPT"
-echo "Log: $LOG_FILE"
-open -n -a "$SLICER_APP_PATH" --args --ignore-slicerrc --python-script "$SLICER_SCRIPT" >"$LOG_FILE" 2>&1
 echo "Requested Slicer load for: $SLICER_SCRIPT"
 ''',
         encoding="utf-8",
@@ -801,6 +833,8 @@ def _include_output_mask_in_qc(path: Path) -> bool:
         return True
     if lower.endswith("_aortic_wall_contrast_lumen_from_centerline_hu.nii.gz"):
         return True
+    if lower.endswith("_wall_thickness_gt4mm.nii.gz") or lower.endswith("_wall_thickness_bins.nii.gz"):
+        return True
     if "_lumen_hu_label_" in lower and lower.endswith(".nii.gz"):
         return True
     if lower.endswith("_periaortic_fat_0_2mm.nii.gz") or lower.endswith("_periaortic_fat_2_5mm.nii.gz"):
@@ -839,6 +873,9 @@ def infer_anatomy(path: Path, allowed: list[str]) -> str | None:
 
 def infer_task(path: Path, allowed: list[str]) -> str | None:
     lower = path.name.lower()
+    if "protrusion" in lower or "ulcer_like" in lower:
+        if "lumen_protrusion" in allowed or "all" in allowed:
+            return "lumen_protrusion"
     if lower.endswith("_aortic_wall_contrast_lumen_from_centerline_hu.nii.gz"):
         if "lumen_protrusion" in allowed:
             return "lumen_protrusion"
@@ -870,6 +907,8 @@ def infer_category(path: Path, anatomy: str, task: str) -> str:
     if "_lumen_hu_label_" in lower:
         return "lumen"
     if "aortic_wall_candidate_from_fat_lumen" in lower:
+        return "wall"
+    if "wall_thickness" in lower:
         return "wall"
     if any(token in lower for token in ["fat", "adipose"]):
         return "fat"
@@ -911,7 +950,7 @@ def _short_qc_label(stem: str) -> str:
     if stem in {"aorta_vista_trace", "aorta_highres_trace", "aorta_trace"}:
         return "Aorta"
     if stem == "calcification_aorta_wall_dynamic_seed500HU_candidate":
-        return "Bone"
+        return "Ca"
     if stem == "aortic_wall_contrast_lumen_from_centerline_hu":
         return "Lumen"
     if stem.startswith("lumen_hu_label_") or "_lumen_hu_label_" in stem:
@@ -920,6 +959,10 @@ def _short_qc_label(stem: str) -> str:
         return "Aorta HU"
     if stem == "aortic_wall_candidate_from_fat_lumen":
         return "Wall"
+    if stem == "wall_thickness_gt4mm":
+        return "WT >4"
+    if stem == "wall_thickness_bins":
+        return "WT bins"
     if stem == "periaortic_fat_0_2mm":
         return "Fat 0-2"
     if stem == "periaortic_fat_2_5mm":
@@ -986,6 +1029,21 @@ def _records_by_case(records: list[MaskRecord]) -> dict[str, list[MaskRecord]]:
     return grouped
 
 
+def _label_palette_for_mask(record: MaskRecord) -> dict[int, dict[str, object]]:
+    lower = Path(record.mask_path).name.lower()
+    if lower.endswith("_wall_thickness_bins.nii.gz"):
+        return {
+            value: {"name": name, "color": color}
+            for value, (name, color) in WALL_THICKNESS_BIN_PALETTE.items()
+        }
+    if lower.endswith("_aortic_wall_from_fat_lumen_labels.nii.gz"):
+        return {
+            value: {"name": name, "color": color}
+            for value, (name, color) in WALL_FROM_FAT_LABEL_PALETTE.items()
+        }
+    return {}
+
+
 def _slicer_script(case_id: str, records: list[MaskRecord]) -> str:
     if not records:
         raise ValueError("At least one record is required for a Slicer script.")
@@ -999,6 +1057,7 @@ def _slicer_script(case_id: str, records: list[MaskRecord]) -> str:
                 "label": record.label,
                 "category": record.category,
                 "color": color,
+                "label_palette": _label_palette_for_mask(record),
                 "opacity": _qc_opacity(record.category),
                 "fill_opacity": _qc_fill_opacity(record.category),
                 "outline_opacity": 1.0,
@@ -1080,8 +1139,15 @@ for spec in MASKS:
     for index in range(segment_count):
         segment = segmentation.GetNthSegment(index)
         segment_id = segmentation.GetNthSegmentID(index)
-        segment.SetName(spec["label"] if segment_count == 1 else str(index + 1).zfill(3))
-        segment.SetColor(float(spec["color"][0]), float(spec["color"][1]), float(spec["color"][2]))
+        label_value = index + 1
+        label_info = spec.get("label_palette", {{}}).get(str(label_value))
+        if label_info:
+            segment.SetName(label_info["name"])
+            color = label_info["color"]
+        else:
+            segment.SetName(spec["label"] if segment_count == 1 else str(label_value).zfill(3))
+            color = spec["color"]
+        segment.SetColor(float(color[0]), float(color[1]), float(color[2]))
         if display_node:
             display_node.SetSegmentVisibility(segment_id, True)
             display_node.SetSegmentOpacity3D(segment_id, float(spec["opacity"]))

@@ -179,3 +179,4 @@ This wrapper supports DICOM->NIfTI, defacing, TotalSegmentator, TopCoW, NV, NUDF
 - Study presets: `subprojects/studies/README.md`
 - Centerline stack is intentionally removed for now
 - Avoid committing machine-specific absolute paths in scripts/docs
+- DAYLIGHT clinical review file `clinicas_n86_REVISADO_FINAL_complete.csv` is intentionally kept outside the repository because it contains patient identifiers (`pin` in all 87 rows). For the 2026-08-13 DAYLIGHT analysis run, the local source path is documented in `output/daylight_phase0_2026-08-13/phase0_notas_rutas_y_privacidad.md`.

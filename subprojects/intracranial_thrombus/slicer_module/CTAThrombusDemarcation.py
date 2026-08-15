@@ -453,3 +453,21 @@ def show_wizard():
     dlg.show()
     _WIZARD_DIALOG = dlg
     return dlg
+
+
+def get_last_annotation():
+    """Devuelve la anotacion (vessel/side/tici/...) del wizard de Demarcation
+    actualmente abierto (o el ultimo creado), o None si no hay ninguno.
+
+    Se usa desde CTAThrombusFinalizeSOP.py para que el boton standalone de
+    Finalize tambien capture la anotacion cuando el usuario la eligio en el
+    wizard de Demarcation pero finaliza desde el modulo Finalize por separado
+    -- antes esa anotacion se perdia en silencio (ver sub-485_thrombus_clean_log.json,
+    "annotation": {} vacio, agosto 2026)."""
+    global _WIZARD_WIDGET
+    if _WIZARD_WIDGET is None:
+        return None
+    try:
+        return _WIZARD_WIDGET._collect_annotation()
+    except Exception:
+        return None

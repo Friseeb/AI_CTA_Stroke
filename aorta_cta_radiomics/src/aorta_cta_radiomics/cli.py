@@ -7,6 +7,7 @@ import shutil
 import argparse
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 from . import __version__
 
@@ -31,9 +32,120 @@ class CaseResult:
     wall_morphology_sector_features: pd.DataFrame
     wall_morphology_parcel_features: pd.DataFrame
     wall_from_fat_features: pd.DataFrame
+    wall_thickness_features: pd.DataFrame
     encoder_features: pd.DataFrame
     encoder_patch_manifest: pd.DataFrame
     wide_features: pd.DataFrame
+
+
+_ALL_STAGES = frozenset(
+    {
+        "qc",
+        "calcification",
+        "calcium_omics",
+        "geometry",
+        "wall_morphology",
+        "encoders",
+        "fat_omics",
+        "lumen_protrusions",
+        "wall_from_fat",
+        "wall_lumen_protrusions",
+        "wall_thickness",
+        "radiomics",
+        "figures",
+    }
+)
+
+_STAGE_ALIASES = {
+    "all": set(_ALL_STAGES),
+    "calc": {"calcification", "calcium_omics"},
+    "calcium": {"calcification", "calcium_omics"},
+    "calcification": {"calcification", "calcium_omics"},
+    "calcium_omics": {"calcium_omics"},
+    "fat": {"fat_omics"},
+    "perifat": {"fat_omics"},
+    "periaortic_fat": {"fat_omics"},
+    "fat_omics": {"fat_omics"},
+    "morphology": {"wall_morphology"},
+    "wall_morphology": {"wall_morphology"},
+    "encoder": {"encoders"},
+    "encoders": {"encoders"},
+    "lumen_protrusions": {"lumen_protrusions"},
+    "protrusions": {"lumen_protrusions", "wall_lumen_protrusions"},
+    "ulcers": {"lumen_protrusions", "wall_lumen_protrusions"},
+    "wall": {"wall_from_fat", "wall_lumen_protrusions", "wall_thickness"},
+    "wall_from_fat": {"wall_from_fat"},
+    "wall_lumen": {"wall_from_fat", "wall_lumen_protrusions"},
+    "wall_lumen_protrusions": {"wall_lumen_protrusions"},
+    "wall_thickness": {"wall_thickness"},
+    "thickness": {"wall_thickness"},
+    "radiomics": {"radiomics"},
+    "qc": {"qc"},
+    "geometry": {"geometry"},
+    "figures": {"figures"},
+}
+
+_STAGE_SENTINEL_FILENAMES = {
+    "calcification": ["{case_id}_calcification_aorta_wall_band_thr130HU.nii.gz"],
+    "fat_omics": ["{case_id}_periaortic_fat.nii.gz"],
+    "wall_morphology": ["{case_id}_wall_morphology_candidate_boundary.nii.gz"],
+    "wall_from_fat": [
+        "{case_id}_aortic_wall_candidate_from_fat_lumen.nii.gz",
+        "{case_id}_wall_lumen_excluded_complete.txt",
+    ],
+    "wall_lumen_protrusions": ["{case_id}_wall_lumen_protrusions_complete.txt"],
+    "wall_thickness": ["{case_id}_wall_thickness_map_mm.nii.gz"],
+    "radiomics": ["{case_id}_radiomics_fastrad_complete.txt"],
+}
+
+
+@dataclass(frozen=True)
+class StagePlan:
+    active: frozenset[str]
+    partial: bool
+
+    def enabled(self, stage: str) -> bool:
+        return stage in self.active
+
+
+def _expand_stage_names(values: list[str] | tuple[str, ...] | None) -> set[str]:
+    stages: set[str] = set()
+    for value in values or []:
+        for token in str(value).replace(",", " ").split():
+            key = token.strip().lower().replace("-", "_")
+            if not key:
+                continue
+            if key not in _STAGE_ALIASES:
+                valid = ", ".join(sorted(_STAGE_ALIASES))
+                raise ValueError(f"Unknown stage '{token}'. Valid stages/aliases: {valid}")
+            stages.update(_STAGE_ALIASES[key])
+    return stages
+
+
+def make_stage_plan(
+    only_stages: list[str] | tuple[str, ...] | None = None,
+    skip_stages: list[str] | tuple[str, ...] | None = None,
+) -> StagePlan:
+    """Resolve user-facing stage names to canonical pipeline stage switches."""
+    only = _expand_stage_names(only_stages)
+    skipped = _expand_stage_names(skip_stages)
+    active = (set(_ALL_STAGES) if not only else only) - skipped
+    partial = bool(only or skipped)
+    return StagePlan(active=frozenset(active), partial=partial)
+
+
+def sentinel_filenames_for_stages(
+    only_stages: list[str] | tuple[str, ...] | None = None,
+    skip_stages: list[str] | tuple[str, ...] | None = None,
+) -> list[str]:
+    """Return output sentinels used by runners to decide whether a case is complete."""
+    plan = make_stage_plan(only_stages, skip_stages)
+    filenames: list[str] = []
+    for stage in sorted(plan.active):
+        filenames.extend(_STAGE_SENTINEL_FILENAMES.get(stage, []))
+    seen: set[str] = set()
+    unique = [name for name in filenames if not (name in seen or seen.add(name))]
+    return unique
 
 
 def run_pipeline_case(
@@ -42,6 +154,9 @@ def run_pipeline_case(
     case_id: str,
     outdir: str | Path,
     config_path: str | Path | None = None,
+    only_stages: list[str] | tuple[str, ...] | None = None,
+    skip_stages: list[str] | tuple[str, ...] | None = None,
+    progress_callback: object | None = None,
 ) -> CaseResult:
     """Run the version-1 pipeline for one CTA/aorta-mask pair."""
     import numpy as np
@@ -61,15 +176,26 @@ def run_pipeline_case(
     from .fat_omics import extract_periaortic_fat_omics
     from .fat_wall import extract_fat_closed_aortic_wall
     from .features import ensure_feature_columns, long_to_wide_features, write_csv
-    from .io import load_image_and_mask, write_label_like, write_mask_like
+    from .io import load_image_and_mask, write_float_like, write_label_like, write_mask_like
     from .lumen_protrusions import detect_lumen_protrusions
     from .lumen_geometry import slice_geometry_features
     from .preprocess import clean_aorta_mask
     from .segmentation_qc import calculate_qc_metrics, qc_metrics_to_frame
     from .shells import create_aorta_wall_band_masks, create_base_shells, local_shell_around_mask
     from .wall_morphology import extract_wall_morphology
+    from .wall_thickness import measure_wall_thickness, thickness_threshold_summary, wall_thickness_threshold_mask
 
     config = load_config(config_path)
+    stage_plan = make_stage_plan(only_stages=only_stages, skip_stages=skip_stages)
+
+    def _progress(stage: str, status: str) -> None:
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(case_id, stage, status)
+        except Exception:
+            pass
+
     outdir = Path(outdir)
     project_root = Path(__file__).resolve().parents[2]
 
@@ -80,14 +206,17 @@ def run_pipeline_case(
     for directory in [masks_dir, figures_dir, qc_dir, features_dir]:
         directory.mkdir(parents=True, exist_ok=True)
 
+    _progress("load", "start")
     image, raw_mask, mask_resampled = load_image_and_mask(
         image_path=image_path,
         mask_path=aorta_mask_path,
         resample_mask_if_needed=bool(config["image"]["resample_mask_if_needed"]),
     )
+    _progress("load", "done")
     spacing_xyz = image.spacing_xyz
     software_version = str(config["outputs"].get("software_version", __version__))
 
+    _progress("qc", "start")
     cleaned_mask, cleaning_report = clean_aorta_mask(
         raw_mask.array,
         keep_largest_component=bool(config["mask_cleaning"]["keep_largest_component"]),
@@ -108,11 +237,12 @@ def run_pipeline_case(
         large_mask_volume_mm3=float(config["mask_cleaning"]["large_mask_volume_mm3"]),
     )
     qc_frame = qc_metrics_to_frame(qc_metrics)
+    _progress("qc", "done")
 
-    calcification_enabled = bool(config["calcification"].get("enabled", True))
+    calcification_enabled = bool(config["calcification"].get("enabled", True)) and stage_plan.enabled("calcification")
     radiomics_regions = (
         set(config.get("radiomics", {}).get("regions", []))
-        if bool(config.get("radiomics", {}).get("enabled", False))
+        if bool(config.get("radiomics", {}).get("enabled", False)) and stage_plan.enabled("radiomics")
         else set()
     )
     shell_specs = list(config["shells"].get("base", []))
@@ -132,6 +262,7 @@ def run_pipeline_case(
     calcification_frame = pd.DataFrame()
     calc_roi_name = ""
     if calcification_enabled:
+        _progress("calcification", "start")
         calc_roi_name = str(config["calcification"]["roi"])
         calc_roi = cleaned_mask if calc_roi_name == "aorta_mask" else shell_masks.get(calc_roi_name)
         if calc_roi is None:
@@ -245,6 +376,9 @@ def run_pipeline_case(
         case_id=case_id,
         reference_image=image.image,
     )
+    geometry_enabled = bool(config["geometry"]["enabled"]) and stage_plan.enabled("geometry")
+    if geometry_enabled:
+        _progress("geometry", "start")
     geometry_frame = (
         slice_geometry_features(
             cleaned_mask,
@@ -254,9 +388,11 @@ def run_pipeline_case(
             max_branch_link_distance_mm=float(config["geometry"].get("max_branch_link_distance_mm", 20.0)),
             max_components_per_slice=int(config["geometry"].get("max_components_per_slice", 4)),
         )
-        if bool(config["geometry"]["enabled"])
+        if geometry_enabled
         else pd.DataFrame()
     )
+    if geometry_enabled:
+        _progress("geometry", "done")
 
     calcium_seed = (
         dynamic_calcification.mask
@@ -276,9 +412,11 @@ def run_pipeline_case(
             image.image,
             masks_dir / f"{case_id}_shell_calcification_local.nii.gz",
         )
+        _progress("calcification", "done")
 
     wall_config = config.get("wall_morphology", {})
-    if bool(wall_config.get("enabled", False)):
+    if bool(wall_config.get("enabled", False)) and stage_plan.enabled("wall_morphology"):
+        _progress("wall_morphology", "start")
         wall_result = extract_wall_morphology(
             cleaned_mask,
             spacing_xyz=spacing_xyz,
@@ -376,6 +514,7 @@ def run_pipeline_case(
         shell_masks["wall_morphology_parcels_wall"] = wall_result.parcel_labelmap > 0
         shell_masks["wall_morphology_inward_parcels_wall"] = wall_result.inward_parcel_labelmap > 0
         shell_masks["wall_morphology_outward_parcels_wall"] = wall_result.outward_parcel_labelmap > 0
+        _progress("wall_morphology", "done")
     else:
         wall_result = None
 
@@ -401,20 +540,27 @@ def run_pipeline_case(
         ),
         patch_sources=list(config.get("encoders", {}).get("patch_sources", [])),
     )
-    encoder_features, encoder_patch_manifest = extract_encoder_features_from_masks(
-        image=image.array,
-        source_masks=encoder_source_masks,
-        spacing_xyz=spacing_xyz,
-        case_id=case_id,
-        config=config,
-        software_version=software_version,
-    )
+    if stage_plan.enabled("encoders"):
+        _progress("encoders", "start")
+        encoder_features, encoder_patch_manifest = extract_encoder_features_from_masks(
+            image=image.array,
+            source_masks=encoder_source_masks,
+            spacing_xyz=spacing_xyz,
+            case_id=case_id,
+            config=config,
+            software_version=software_version,
+        )
+        _progress("encoders", "done")
+    else:
+        encoder_features = pd.DataFrame()
+        encoder_patch_manifest = pd.DataFrame()
 
     segment_labels = whole_aorta_segment_mask(cleaned_mask)
     segment_path = masks_dir / f"{case_id}_aorta_segments_v1.nii.gz"
     write_mask_like(segment_labels, image.image, segment_path)
     segment_frame = segment_summary(segment_labels, spacing_xyz, case_id)
-    if calcification_enabled and calcium_seed.any():
+    if calcification_enabled and calcium_seed.any() and stage_plan.enabled("calcium_omics"):
+        _progress("calcium_omics", "start")
         if dynamic_calcification is not None and dynamic_calcification.mask.any():
             calcium_omics_threshold = (
                 f"dynamic_lumen_referenced_seed{int(float(dynamic_config.get('seed_threshold_hu', 500.0)))}HU"
@@ -436,11 +582,13 @@ def run_pipeline_case(
             segment_names=SEGMENT_LABELS,
             software_version=software_version,
         )
+        _progress("calcium_omics", "done")
     else:
         calcium_omics_frame = pd.DataFrame()
 
     protrusion_config = config.get("lumen_protrusions", {})
-    if bool(protrusion_config.get("enabled", False)):
+    if bool(protrusion_config.get("enabled", False)) and stage_plan.enabled("lumen_protrusions"):
+        _progress("lumen_protrusions", "start")
         protrusion_result = detect_lumen_protrusions(
             lumen_mask=cleaned_mask,
             spacing_xyz=spacing_xyz,
@@ -762,13 +910,15 @@ def run_pipeline_case(
                 ),
                 sources=list(protrusion_config.get("thresholded_qc_sources", ["aorta_surface_core"])),
             )
+        _progress("lumen_protrusions", "done")
     else:
         lumen_protrusion_summary = pd.DataFrame()
         lumen_protrusion_candidates = pd.DataFrame()
         lumen_protrusion_point_features = pd.DataFrame()
 
     fat_config = config.get("fat_omics", {})
-    if bool(fat_config.get("enabled", True)):
+    if bool(fat_config.get("enabled", True)) and stage_plan.enabled("fat_omics"):
+        _progress("fat_omics", "start")
         fat_result = extract_periaortic_fat_omics(
             image=image.array,
             aorta_mask=cleaned_mask,
@@ -809,14 +959,32 @@ def run_pipeline_case(
                     image.image,
                     masks_dir / f"{case_id}_{layer_name}.nii.gz",
                 )
+        _progress("fat_omics", "done")
     else:
         fat_omics_frame = pd.DataFrame()
         fat_result = None
+        if (
+            bool(fat_config.get("enabled", True))
+            and stage_plan.enabled("wall_from_fat")
+            and not stage_plan.enabled("fat_omics")
+        ):
+            existing_fat_mask = _read_existing_mask_array(
+                masks_dir / f"{case_id}_periaortic_fat.nii.gz",
+                expected_shape=cleaned_mask.shape,
+                description="periaortic fat",
+            )
+            fat_result = SimpleNamespace(
+                fat_mask=existing_fat_mask,
+                periaortic_roi_mask=None,
+                fat_layer_masks={},
+                features=pd.DataFrame(),
+            )
 
     wall_from_fat_config = config.get("wall_from_fat", {})
-    if bool(wall_from_fat_config.get("enabled", False)):
+    if bool(wall_from_fat_config.get("enabled", False)) and stage_plan.enabled("wall_from_fat"):
         if fat_result is None:
             raise ValueError("wall_from_fat requires fat_omics.enabled=true so fat support can be estimated.")
+        _progress("wall_from_fat", "start")
         wall_from_fat_result = extract_fat_closed_aortic_wall(
             image=image.array,
             aorta_mask=cleaned_mask,
@@ -854,6 +1022,8 @@ def run_pipeline_case(
             exclude_fat_from_wall=bool(wall_from_fat_config.get("exclude_fat_from_wall", True)),
             exclude_calcification_hu=_optional_float(wall_from_fat_config.get("exclude_calcification_hu", None)),
             include_calcification_in_wall=bool(wall_from_fat_config.get("include_calcification_in_wall", True)),
+            calcium_wall_internal_mm=float(wall_from_fat_config.get("calcium_wall_internal_mm", 2.0)),
+            calcium_wall_external_mm=float(wall_from_fat_config.get("calcium_wall_external_mm", 2.0)),
             lumen_correction_enabled=bool(wall_from_fat_config.get("lumen_correction_enabled", False)),
             lumen_correction_outer_mm=float(wall_from_fat_config.get("lumen_correction_outer_mm", 2.0)),
             lumen_correction_close_radius_mm=float(
@@ -913,8 +1083,14 @@ def run_pipeline_case(
                 image.image,
                 masks_dir / f"{case_id}_aortic_wall_from_fat_lumen_labels.nii.gz",
             )
+            (masks_dir / f"{case_id}_wall_lumen_excluded_complete.txt").write_text(
+                "complete\n",
+                encoding="utf-8",
+            )
+        _progress("wall_from_fat", "done")
         wall_lumen_protrusion_config = wall_from_fat_config.get("protrusions", {})
-        if bool(wall_lumen_protrusion_config.get("enabled", False)):
+        if bool(wall_lumen_protrusion_config.get("enabled", False)) and stage_plan.enabled("wall_lumen_protrusions"):
+            _progress("wall_lumen_protrusions", "start")
             wall_lumen_protrusion_result = detect_lumen_protrusions(
                 lumen_mask=wall_from_fat_result.contrast_lumen_mask,
                 spacing_xyz=spacing_xyz,
@@ -1080,25 +1256,122 @@ def run_pipeline_case(
                     ),
                     output_prefix="wall_lumen_protrusion",
                 )
+            (masks_dir / f"{case_id}_wall_lumen_protrusions_complete.txt").write_text(
+                "complete\n",
+                encoding="utf-8",
+            )
+            _progress("wall_lumen_protrusions", "done")
     else:
         wall_from_fat_result = None
         wall_from_fat_frame = pd.DataFrame()
 
-    radiomics_frame = _extract_configured_radiomics(
-        config=config,
-        project_root=project_root,
-        image_path=Path(image_path),
-        masks_dir=masks_dir,
-        cleaned_mask_path=cleaned_mask_path,
-        shell_masks=shell_masks,
-        reference_image=image.image,
-        case_id=case_id,
-        software_version=software_version,
-    )
+    if (
+        wall_from_fat_result is None
+        and stage_plan.enabled("wall_thickness")
+        and not stage_plan.enabled("wall_from_fat")
+    ):
+        wall_from_fat_result = SimpleNamespace(
+            contrast_lumen_mask=_read_existing_mask_array(
+                masks_dir / f"{case_id}_aortic_wall_contrast_lumen_from_centerline_hu.nii.gz",
+                expected_shape=cleaned_mask.shape,
+                description="wall contrast lumen",
+            ),
+            wall_candidate_mask=_read_existing_mask_array(
+                masks_dir / f"{case_id}_aortic_wall_candidate_from_fat_lumen.nii.gz",
+                expected_shape=cleaned_mask.shape,
+                description="aortic wall candidate",
+            ),
+        )
 
-    if bool(config["outputs"]["save_figures"]):
+    wall_thickness_config = config.get("wall_thickness", {})
+    if (
+        bool(wall_thickness_config.get("enabled", True))
+        and stage_plan.enabled("wall_thickness")
+        and wall_from_fat_result is not None
+    ):
+        _progress("wall_thickness", "start")
+        wall_thickness_result = measure_wall_thickness(
+            lumen_mask=wall_from_fat_result.contrast_lumen_mask,
+            wall_mask=wall_from_fat_result.wall_candidate_mask,
+            spacing_xyz=spacing_xyz,
+            case_id=case_id,
+            software_version=software_version,
+        )
+        threshold_mm = float(wall_thickness_config.get("threshold_mm", 4.0))
+        wall_thickness_gt_threshold = wall_thickness_threshold_mask(
+            wall_thickness_result.thickness_map_mm,
+            wall_thickness_result.wall_mask,
+            threshold_mm=threshold_mm,
+        )
+        wall_thickness_frame = pd.concat(
+            [
+                wall_thickness_result.summary,
+                thickness_threshold_summary(
+                    case_id=case_id,
+                    threshold_mask=wall_thickness_gt_threshold,
+                    wall_mask=wall_thickness_result.wall_mask,
+                    spacing_xyz=spacing_xyz,
+                    threshold_mm=threshold_mm,
+                    software_version=software_version,
+                ),
+            ],
+            ignore_index=True,
+        )
+        shell_masks["wall_thickness_gt4mm"] = wall_thickness_gt_threshold
+        if bool(wall_thickness_config.get("save_maps", True)) and bool(config["outputs"]["save_masks"]):
+            write_mask_like(
+                wall_thickness_result.inner_surface_mask,
+                image.image,
+                masks_dir / f"{case_id}_wall_thickness_inner_surface.nii.gz",
+            )
+            write_mask_like(
+                wall_thickness_result.outer_surface_mask,
+                image.image,
+                masks_dir / f"{case_id}_wall_thickness_outer_surface.nii.gz",
+            )
+            write_float_like(
+                wall_thickness_result.thickness_map_mm,
+                image.image,
+                masks_dir / f"{case_id}_wall_thickness_map_mm.nii.gz",
+            )
+            write_label_like(
+                wall_thickness_result.thickness_bin_labelmap,
+                image.image,
+                masks_dir / f"{case_id}_wall_thickness_bins.nii.gz",
+            )
+            write_mask_like(
+                wall_thickness_gt_threshold,
+                image.image,
+                masks_dir / f"{case_id}_wall_thickness_gt4mm.nii.gz",
+            )
+        _progress("wall_thickness", "done")
+    else:
+        wall_thickness_frame = pd.DataFrame()
+
+    if stage_plan.enabled("radiomics"):
+        _progress("radiomics", "start")
+        radiomics_frame = _extract_configured_radiomics(
+            config=config,
+            project_root=project_root,
+            image_path=Path(image_path),
+            masks_dir=masks_dir,
+            cleaned_mask_path=cleaned_mask_path,
+            shell_masks=shell_masks,
+            reference_image=image.image,
+            case_id=case_id,
+            software_version=software_version,
+        )
+        _write_radiomics_completion_marker(config, radiomics_frame, masks_dir, case_id)
+        _progress("radiomics", "done")
+    else:
+        radiomics_frame = pd.DataFrame()
+
+    if bool(config["outputs"]["save_figures"]) and stage_plan.enabled("figures"):
+        _progress("figures", "start")
         _save_figures(image.array, cleaned_mask, calcium_seed, case_id, figures_dir)
+        _progress("figures", "done")
 
+    _progress("write_outputs", "start")
     case_level_features = _qc_to_feature_rows(qc_metrics, software_version)
     wall_morphology_features = wall_result.summary_features if wall_result is not None else pd.DataFrame()
     wall_morphology_sector_features = wall_result.sector_features if wall_result is not None else pd.DataFrame()
@@ -1112,6 +1385,7 @@ def run_pipeline_case(
             ensure_feature_columns(lumen_protrusion_summary),
             ensure_feature_columns(wall_morphology_features),
             ensure_feature_columns(wall_from_fat_frame),
+            ensure_feature_columns(wall_thickness_frame),
             ensure_feature_columns(radiomics_frame),
             ensure_feature_columns(encoder_features),
         ],
@@ -1119,25 +1393,33 @@ def run_pipeline_case(
     )
     wide_features = long_to_wide_features(all_long_features)
 
-    write_csv(qc_frame, qc_dir / "qc_summary.csv")
-    write_csv(calcification_frame, features_dir / "calcification_features.csv")
-    write_csv(calcium_omics_frame, features_dir / "calcium_omics_features.csv")
-    write_csv(fat_omics_frame, features_dir / "fat_omics_features.csv")
-    write_csv(lumen_protrusion_summary, features_dir / "lumen_protrusion_summary_features.csv")
-    write_csv(lumen_protrusion_candidates, features_dir / "lumen_protrusion_candidates.csv")
-    write_csv(lumen_protrusion_point_features, features_dir / "lumen_protrusion_point_features.csv")
-    write_csv(wall_morphology_features, features_dir / "wall_morphology_features.csv")
-    write_csv(wall_morphology_sector_features, features_dir / "wall_morphology_sector_features.csv")
-    write_csv(wall_morphology_parcel_features, features_dir / "wall_morphology_parcel_features.csv")
-    write_csv(wall_from_fat_frame, features_dir / "wall_from_fat_features.csv")
-    write_csv(radiomics_frame, features_dir / "radiomics_features.csv")
-    write_csv(encoder_features, features_dir / "encoder_features.csv")
-    write_csv(encoder_patch_manifest, features_dir / "encoder_patch_manifest.csv")
-    write_csv(case_level_features, features_dir / "case_level_features.csv")
-    write_csv(centerline_frame, features_dir / "centerline_points.csv")
-    write_csv(geometry_frame, features_dir / "centerline_point_features.csv")
-    write_csv(segment_frame, features_dir / "segment_level_features.csv")
-    write_csv(wide_features, features_dir / "modeling_wide_features.csv")
+    def _write_stage(stage: str, frame: pd.DataFrame, path: Path) -> None:
+        if stage_plan.enabled(stage):
+            write_csv(frame, path)
+
+    _write_stage("qc", qc_frame, qc_dir / "qc_summary.csv")
+    _write_stage("calcification", calcification_frame, features_dir / "calcification_features.csv")
+    _write_stage("calcium_omics", calcium_omics_frame, features_dir / "calcium_omics_features.csv")
+    _write_stage("fat_omics", fat_omics_frame, features_dir / "fat_omics_features.csv")
+    if stage_plan.enabled("lumen_protrusions") or stage_plan.enabled("wall_lumen_protrusions"):
+        write_csv(lumen_protrusion_summary, features_dir / "lumen_protrusion_summary_features.csv")
+        write_csv(lumen_protrusion_candidates, features_dir / "lumen_protrusion_candidates.csv")
+        write_csv(lumen_protrusion_point_features, features_dir / "lumen_protrusion_point_features.csv")
+    _write_stage("wall_morphology", wall_morphology_features, features_dir / "wall_morphology_features.csv")
+    _write_stage("wall_morphology", wall_morphology_sector_features, features_dir / "wall_morphology_sector_features.csv")
+    _write_stage("wall_morphology", wall_morphology_parcel_features, features_dir / "wall_morphology_parcel_features.csv")
+    _write_stage("wall_from_fat", wall_from_fat_frame, features_dir / "wall_from_fat_features.csv")
+    _write_stage("wall_thickness", wall_thickness_frame, features_dir / "wall_thickness_features.csv")
+    _write_stage("radiomics", radiomics_frame, features_dir / "radiomics_features.csv")
+    _write_stage("encoders", encoder_features, features_dir / "encoder_features.csv")
+    _write_stage("encoders", encoder_patch_manifest, features_dir / "encoder_patch_manifest.csv")
+    _write_stage("qc", case_level_features, features_dir / "case_level_features.csv")
+    _write_stage("geometry", centerline_frame, features_dir / "centerline_points.csv")
+    _write_stage("geometry", geometry_frame, features_dir / "centerline_point_features.csv")
+    _write_stage("geometry", segment_frame, features_dir / "segment_level_features.csv")
+    if not stage_plan.partial:
+        write_csv(wide_features, features_dir / "modeling_wide_features.csv")
+    _progress("write_outputs", "done")
 
     return CaseResult(
         qc=qc_frame,
@@ -1156,6 +1438,7 @@ def run_pipeline_case(
         wall_morphology_sector_features=wall_morphology_sector_features,
         wall_morphology_parcel_features=wall_morphology_parcel_features,
         wall_from_fat_features=wall_from_fat_frame,
+        wall_thickness_features=wall_thickness_frame,
         encoder_features=encoder_features,
         encoder_patch_manifest=encoder_patch_manifest,
         wide_features=wide_features,
@@ -1168,10 +1451,12 @@ def run_single(
     case_id: str,
     outdir: Path = Path("outputs"),
     config: Path | None = None,
+    only_stages: list[str] | None = None,
+    skip_stages: list[str] | None = None,
 ) -> None:
     """Run one case."""
     _configure_logging()
-    result = run_pipeline_case(image, aorta_mask, case_id, outdir, config)
+    result = run_pipeline_case(image, aorta_mask, case_id, outdir, config, only_stages, skip_stages)
     print(f"Wrote outputs for {case_id} to {outdir}")
     print(f"QC rows: {len(result.qc)}; calcification rows: {len(result.calcification)}")
 
@@ -1180,6 +1465,8 @@ def run_batch(
     manifest: Path,
     outdir: Path = Path("outputs"),
     config: Path | None = None,
+    only_stages: list[str] | None = None,
+    skip_stages: list[str] | None = None,
 ) -> None:
     """Run all cases from a manifest CSV."""
     import pandas as pd
@@ -1202,12 +1489,14 @@ def run_batch(
                 case_id=case_id,
                 outdir=outdir,
                 config_path=config,
+                only_stages=only_stages,
+                skip_stages=skip_stages,
             )
         )
 
     features_dir = Path(outdir) / "features"
     qc_dir = Path(outdir) / "qc"
-    _write_aggregated(results, qc_dir, features_dir)
+    _write_aggregated(results, qc_dir, features_dir, only_stages=only_stages, skip_stages=skip_stages)
     print(f"Wrote batch outputs for {len(results)} cases to {outdir}")
 
 
@@ -1232,11 +1521,12 @@ def _extract_configured_radiomics(
     if not bool(config["radiomics"]["enabled"]):
         return pd.DataFrame()
 
+    radiomics_backend = str(config["radiomics"].get("backend", "pyradiomics"))
     settings_path = resolve_project_path(str(config["radiomics"]["settings_path"]), project_root)
     if settings_path.exists():
-        shutil.copy2(settings_path, masks_dir / f"{case_id}_pyradiomics_settings.yaml")
+        shutil.copy2(settings_path, masks_dir / f"{case_id}_{radiomics_backend}_settings.yaml")
     else:
-        logger.warning("PyRadiomics settings file not found: %s. Using PyRadiomics defaults.", settings_path)
+        logger.warning("Radiomics settings file not found: %s. Using %s defaults.", settings_path, radiomics_backend)
         settings_path = None
 
     region_paths: dict[str, Path] = {"aorta_mask": cleaned_mask_path}
@@ -1264,6 +1554,8 @@ def _extract_configured_radiomics(
                     settings_path=settings_path,
                     include_diagnostics=bool(config["radiomics"]["include_diagnostics"]),
                     software_version=software_version,
+                    backend=radiomics_backend,
+                    device=str(config["radiomics"].get("device", "auto")),
                 )
             )
         except Exception as exc:
@@ -1286,6 +1578,28 @@ def _extract_configured_radiomics(
             if isinstance(exc, ImportError):
                 break
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def _write_radiomics_completion_marker(
+    config: dict,
+    radiomics_frame: pd.DataFrame,
+    masks_dir: Path,
+    case_id: str,
+) -> None:
+    if not bool(config.get("radiomics", {}).get("enabled", False)):
+        return
+    backend = str(config.get("radiomics", {}).get("backend", "pyradiomics"))
+    marker = masks_dir / f"{case_id}_radiomics_{backend}_complete.txt"
+    if marker.exists():
+        marker.unlink()
+    if radiomics_frame.empty or "feature_group" not in radiomics_frame.columns:
+        return
+    groups = radiomics_frame["feature_group"].astype(str)
+    if bool(groups.eq("radiomics_status").any()):
+        return
+    if not bool(groups.str.startswith("radiomics_").any()):
+        return
+    marker.write_text("complete\n", encoding="utf-8")
 
 
 def _qc_to_feature_rows(qc_metrics: dict[str, object], software_version: str) -> pd.DataFrame:
@@ -1379,6 +1693,24 @@ def _highest_nonempty_threshold(masks: dict[int, object]) -> int:
         if np.asarray(mask).any():
             return int(threshold)
     return int(next(iter(masks.keys())))
+
+
+def _read_existing_mask_array(path: Path, expected_shape: tuple[int, ...], description: str) -> object:
+    import numpy as np
+    import SimpleITK as sitk
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Cannot reuse {description}; expected existing mask at {path}. "
+            "Run the upstream stage first or remove the stage-only rerun flag."
+        )
+    mask = sitk.GetArrayFromImage(sitk.ReadImage(str(path))) > 0
+    if tuple(mask.shape) != tuple(expected_shape):
+        raise ValueError(
+            f"Existing {description} mask shape {mask.shape} does not match current image/mask shape "
+            f"{expected_shape}: {path}"
+        )
+    return np.asarray(mask, dtype=bool)
 
 
 def _parse_ranges(values: object) -> list[tuple[float, float]]:
@@ -1505,45 +1837,74 @@ def _save_figures(
         logger.warning("Could not save quicklook figure for %s: %s", case_id, exc)
 
 
-def _write_aggregated(results: list[CaseResult], qc_dir: Path, features_dir: Path) -> None:
+def _write_aggregated(
+    results: list[CaseResult],
+    qc_dir: Path,
+    features_dir: Path,
+    only_stages: list[str] | tuple[str, ...] | None = None,
+    skip_stages: list[str] | tuple[str, ...] | None = None,
+) -> None:
     import pandas as pd
 
     from .features import long_to_wide_features, write_csv
 
+    stage_plan = make_stage_plan(only_stages=only_stages, skip_stages=skip_stages)
     qc_dir.mkdir(parents=True, exist_ok=True)
     features_dir.mkdir(parents=True, exist_ok=True)
     tables = {
-        qc_dir / "qc_summary.csv": [result.qc for result in results],
-        features_dir / "calcification_features.csv": [result.calcification for result in results],
-        features_dir / "calcium_omics_features.csv": [result.calcium_omics for result in results],
-        features_dir / "fat_omics_features.csv": [result.fat_omics for result in results],
-        features_dir / "lumen_protrusion_summary_features.csv": [
+        qc_dir / "qc_summary.csv": ("qc", [result.qc for result in results]),
+        features_dir / "calcification_features.csv": ("calcification", [result.calcification for result in results]),
+        features_dir / "calcium_omics_features.csv": ("calcium_omics", [result.calcium_omics for result in results]),
+        features_dir / "fat_omics_features.csv": ("fat_omics", [result.fat_omics for result in results]),
+        features_dir / "lumen_protrusion_summary_features.csv": ("lumen_protrusions", [
             result.lumen_protrusion_summary for result in results
-        ],
-        features_dir / "lumen_protrusion_candidates.csv": [
+        ]),
+        features_dir / "lumen_protrusion_candidates.csv": ("lumen_protrusions", [
             result.lumen_protrusion_candidates for result in results
-        ],
-        features_dir / "lumen_protrusion_point_features.csv": [
+        ]),
+        features_dir / "lumen_protrusion_point_features.csv": ("lumen_protrusions", [
             result.lumen_protrusion_point_features for result in results
-        ],
-        features_dir / "wall_morphology_features.csv": [result.wall_morphology_features for result in results],
-        features_dir / "wall_morphology_sector_features.csv": [
+        ]),
+        features_dir / "wall_morphology_features.csv": (
+            "wall_morphology",
+            [result.wall_morphology_features for result in results],
+        ),
+        features_dir / "wall_morphology_sector_features.csv": ("wall_morphology", [
             result.wall_morphology_sector_features for result in results
-        ],
-        features_dir / "wall_morphology_parcel_features.csv": [
+        ]),
+        features_dir / "wall_morphology_parcel_features.csv": ("wall_morphology", [
             result.wall_morphology_parcel_features for result in results
-        ],
-        features_dir / "radiomics_features.csv": [result.radiomics for result in results],
-        features_dir / "encoder_features.csv": [result.encoder_features for result in results],
-        features_dir / "encoder_patch_manifest.csv": [result.encoder_patch_manifest for result in results],
-        features_dir / "case_level_features.csv": [result.case_level_features for result in results],
-        features_dir / "centerline_points.csv": [result.centerline_points for result in results],
-        features_dir / "centerline_point_features.csv": [result.centerline_point_features for result in results],
-        features_dir / "segment_level_features.csv": [result.segment_level_features for result in results],
+        ]),
+        features_dir / "wall_from_fat_features.csv": (
+            "wall_from_fat",
+            [result.wall_from_fat_features for result in results],
+        ),
+        features_dir / "wall_thickness_features.csv": (
+            "wall_thickness",
+            [result.wall_thickness_features for result in results],
+        ),
+        features_dir / "radiomics_features.csv": ("radiomics", [result.radiomics for result in results]),
+        features_dir / "encoder_features.csv": ("encoders", [result.encoder_features for result in results]),
+        features_dir / "encoder_patch_manifest.csv": (
+            "encoders",
+            [result.encoder_patch_manifest for result in results],
+        ),
+        features_dir / "case_level_features.csv": ("qc", [result.case_level_features for result in results]),
+        features_dir / "centerline_points.csv": ("geometry", [result.centerline_points for result in results]),
+        features_dir / "centerline_point_features.csv": (
+            "geometry",
+            [result.centerline_point_features for result in results],
+        ),
+        features_dir / "segment_level_features.csv": ("geometry", [result.segment_level_features for result in results]),
     }
-    for path, frames in tables.items():
-        write_csv(pd.concat(frames, ignore_index=True), path)
+    for path, (stage, frames) in tables.items():
+        if stage_plan.enabled(stage) or (
+            stage == "lumen_protrusions" and stage_plan.enabled("wall_lumen_protrusions")
+        ):
+            write_csv(pd.concat(frames, ignore_index=True), path)
 
+    if stage_plan.partial:
+        return
     all_features = pd.concat(
         [
             *[result.case_level_features for result in results],
@@ -1552,6 +1913,8 @@ def _write_aggregated(results: list[CaseResult], qc_dir: Path, features_dir: Pat
             *[result.fat_omics for result in results],
             *[result.lumen_protrusion_summary for result in results],
             *[result.wall_morphology_features for result in results],
+            *[result.wall_from_fat_features for result in results],
+            *[result.wall_thickness_features for result in results],
             *[result.radiomics for result in results],
             *[result.encoder_features for result in results],
         ],
@@ -1574,11 +1937,15 @@ def build_parser() -> argparse.ArgumentParser:
     single.add_argument("--case-id", required=True, help="Case identifier.")
     single.add_argument("--outdir", default=Path("outputs"), type=Path, help="Output directory.")
     single.add_argument("--config", default=None, type=Path, help="YAML config path.")
+    single.add_argument("--only-stage", action="append", default=None, help="Run only this stage/alias. Repeatable.")
+    single.add_argument("--skip-stage", action="append", default=None, help="Skip this stage/alias. Repeatable.")
 
     batch = subparsers.add_parser("run-batch", help="Run cases from a manifest CSV.")
     batch.add_argument("--manifest", required=True, type=Path, help="CSV with case_id,image_path,aorta_mask_path.")
     batch.add_argument("--outdir", default=Path("outputs"), type=Path, help="Output directory.")
     batch.add_argument("--config", default=None, type=Path, help="YAML config path.")
+    batch.add_argument("--only-stage", action="append", default=None, help="Run only this stage/alias. Repeatable.")
+    batch.add_argument("--skip-stage", action="append", default=None, help="Skip this stage/alias. Repeatable.")
     return parser
 
 
@@ -1586,9 +1953,9 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "run-single":
-        run_single(args.image, args.aorta_mask, args.case_id, args.outdir, args.config)
+        run_single(args.image, args.aorta_mask, args.case_id, args.outdir, args.config, args.only_stage, args.skip_stage)
     elif args.command == "run-batch":
-        run_batch(args.manifest, args.outdir, args.config)
+        run_batch(args.manifest, args.outdir, args.config, args.only_stage, args.skip_stage)
     else:
         parser.error(f"Unknown command: {args.command}")
 

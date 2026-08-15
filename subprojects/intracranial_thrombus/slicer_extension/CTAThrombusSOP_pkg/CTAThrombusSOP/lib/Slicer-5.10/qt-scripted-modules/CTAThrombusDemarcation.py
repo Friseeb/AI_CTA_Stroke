@@ -65,6 +65,12 @@ COLLATERAL_OPTIONS = [
     "3 – Good (complete filling)",
 ]
 
+PERVIOUSNESS_OPTIONS = [
+    "-- not assessed --",
+    "Pervious (contrast permeates clot)",
+    "Non-pervious (no contrast in clot)",
+]
+
 _WIZARD_DIALOG = None
 _WIZARD_WIDGET = None
 
@@ -179,6 +185,22 @@ class CTAThrombusDemarcationWidget(ScriptedLoadableModuleWidget):
         self.visibleDelay2Check = qt.QCheckBox("Thrombus visible on 2nd Delay")
         form.addRow("Phase visibility:", self.visibleDelay1Check)
         form.addRow("", self.visibleDelay2Check)
+
+        self.hyperdenseCheck = qt.QCheckBox("Hyperdense clot sign (on CTA or NCCT)")
+        self.hyperdenseCheck.setToolTip(
+            "Mark if the thrombus appears hyperdense relative to surrounding brain tissue "
+            "on non-contrast CT or as a dense artery sign on CTA."
+        )
+        form.addRow("Hyperdense:", self.hyperdenseCheck)
+
+        self.perviousnessCombo = qt.QComboBox()
+        for p in PERVIOUSNESS_OPTIONS:
+            self.perviousnessCombo.addItem(p)
+        self.perviousnessCombo.setToolTip(
+            "Clot perviousness: whether contrast material permeates the thrombus on CTA. "
+            "Pervious clots typically have better lysis response."
+        )
+        form.addRow("Clot perviousness:", self.perviousnessCombo)
 
         layout.addLayout(form)
 
@@ -385,6 +407,8 @@ class CTAThrombusDemarcationWidget(ScriptedLoadableModuleWidget):
                     tip_ras = [round(c, 2) for c in ras]
                     break
 
+        perv = _combo_val(self.perviousnessCombo)
+
         return {
             "vessel":                 vessel if not vessel.startswith("--") else None,
             "side":                   side   if not side.startswith("--")   else None,
@@ -392,6 +416,8 @@ class CTAThrombusDemarcationWidget(ScriptedLoadableModuleWidget):
             "collaterals":            coll   if not coll.startswith("--")   else None,
             "thrombus_visible_delay1": _check_val(self.visibleDelay1Check),
             "thrombus_visible_delay2": _check_val(self.visibleDelay2Check),
+            "hyperdense":             _check_val(self.hyperdenseCheck),
+            "clot_perviousness":      perv if not perv.startswith("--") else None,
             "proximal_tip_ras_mm":    tip_ras,
             "notes":                  _text_val(self.notesText).strip(),
             "annotated_at":           datetime.now().isoformat(),

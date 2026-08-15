@@ -1,4 +1,10 @@
-#!/usr/bin/env python3
+cd /home/fridmans/Documents/pwd/LOVNERA
+/home/fridmans/AI/ai-env/bin/python3 pipelines/wmh_seg/run_wmh_batch.py \
+  --bids-root /media/fridmans/Research13T/datasets/LOVNERABIDS
+cd /home/fridmans/Documents/pwd/LOVNERA
+/home/fridmans/AI/ai-env/bin/python3 pipelines/wmh_seg/run_wmh_batch.py \
+  --bids-root /media/fridmans/Research13T/datasets/LOVNERABIDS
+co#!/usr/bin/env python3
 """
 Live tqdm monitor for DAYLIGHTBIDS NUDF/LA batch runs.
 

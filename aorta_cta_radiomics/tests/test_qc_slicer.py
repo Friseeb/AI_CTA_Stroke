@@ -86,7 +86,7 @@ def test_discover_masks_and_write_slicer_review_outputs(tmp_path: Path):
     assert len(records) == 2
     assert records[0].label == "Aorta"
     assert records[0].category == "artery"
-    assert records[1].label == "Bone"
+    assert records[1].label == "Ca"
     assert records[1].category == "bone"
 
     selection_path = write_selection_table(records, tmp_path / "qc" / "selection.csv")

@@ -22,6 +22,7 @@ import argparse
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -53,6 +54,9 @@ def _parse_args() -> argparse.Namespace:
 
     p.add_argument("--run-totalseg", action="store_true", help="Run TotalSegmentator tasks")
     p.add_argument("--skip-totalseg", action="store_true", help="Skip TotalSegmentator tasks")
+    p.add_argument("--totalseg-fast", action="store_true", help="Use TotalSegmentator fast (3mm) mode instead of full-res")
+    p.add_argument("--totalseg-ml", action="store_true", help="Save TotalSegmentator output as single multilabel file (faster IO)")
+    p.add_argument("--skip-headneck", action="store_true", help="Skip headneck_bones_vessels task (not needed for cardiac analysis)")
 
     p.add_argument("--run-topcow", action="store_true", help="Run TopCoW (Circle of Willis)")
     p.add_argument("--skip-topcow", action="store_true", help="Skip TopCoW")
@@ -71,7 +75,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--skip-merge", action="store_true", help="Skip merged label map")
 
     # Env routing
-    p.add_argument("--totalseg-env", default="totalseg-mac", help="Conda env for TotalSegmentator")
+    p.add_argument("--totalseg-env", default=None, help="Conda env for TotalSegmentator (None = use active env)")
     p.add_argument("--topcow-env", default="topcow_claim", help="Conda env for TopCoW")
     p.add_argument("--nv-env", default="nv-segment-ct", help="Conda env for NV-Segment-CT")
     p.add_argument("--nudf-env", default="cardiac-ct-explorer", help="Conda env for NUDF")
@@ -109,7 +113,7 @@ def main() -> int:
         defaced_path = deface_dir / f"{args.case_id}_defaced.nii.gz"
         _run(
             [
-                "python",
+                sys.executable,
                 str(Path(__file__).parent / "deface_cta_simple.py"),
                 "--input",
                 str(input_nifti),
@@ -125,24 +129,23 @@ def main() -> int:
     totalseg_headneck = out_dir / "totalseg_headneck_bones_vessels"
     totalseg_heart = out_dir / "totalseg_heartchambers_highres"
     if args.run_totalseg and not args.skip_totalseg:
-        _run(
-            [
-                "python",
-                str(Path(__file__).parent / "segment_external_models.py"),
-                "--input",
-                str(defaced_path),
-                "--output",
-                str(out_dir),
-                "--totalseg-task",
-                "total",
-                "--totalseg-task",
-                "headneck_bones_vessels",
-                "--totalseg-task",
-                "heartchambers_highres",
-                "--totalseg-fullres",
-            ],
-            env_name=args.totalseg_env,
-        )
+        ts_cmd = [
+            sys.executable,
+            str(Path(__file__).parent / "segment_external_models.py"),
+            "--input", str(defaced_path),
+            "--output", str(out_dir),
+            "--totalseg-task", "total",
+            "--totalseg-task", "heartchambers_highres",
+        ]
+        if not args.skip_headneck:
+            ts_cmd += ["--totalseg-task", "headneck_bones_vessels"]
+        if args.totalseg_fast:
+            ts_cmd.append("--totalseg-fast")
+        else:
+            ts_cmd.append("--totalseg-fullres")
+        if args.totalseg_ml:
+            ts_cmd.append("--totalseg-ml")
+        _run(ts_cmd, env_name=args.totalseg_env)
 
     # Step 4: TopCoW
     topcow_dir = out_dir / "topcow"
@@ -152,7 +155,7 @@ def main() -> int:
             raise SystemExit("TopCoW requires --topcow-yolo-model and --topcow-nnunet-model-dir")
         _run(
             [
-                "python",
+                sys.executable,
                 str(Path(__file__).parent / "run_topcow_claim.py"),
                 "--input",
                 str(defaced_path),
@@ -180,7 +183,7 @@ def main() -> int:
     if args.run_nv and not args.skip_nv:
         _run(
             [
-                "python",
+                sys.executable,
                 str(Path(__file__).parent / "run_nv_segment_ct_laa.py"),
                 "--input",
                 str(defaced_path),
@@ -201,7 +204,7 @@ def main() -> int:
     if args.run_nv_aorta and not args.skip_nv_aorta:
         _run(
             [
-                "python",
+                sys.executable,
                 str(Path(__file__).parent / "run_nv_segment_ct_laa.py"),
                 "--input",
                 str(defaced_path),
@@ -230,7 +233,7 @@ def main() -> int:
             shutil.copy2(totalseg_heart / "heartchambers_highres.nii.gz", ts_target / "heartchambers_highres.nii.gz")
         _run(
             [
-                "python",
+                sys.executable,
                 str(Path(__file__).parent / "run_cardiac_ct_explorer_nudf_only.py"),
                 "--input",
                 str(defaced_path),
@@ -249,7 +252,7 @@ def main() -> int:
         labels_out = out_dir / "labels_all.nii.gz"
         labels_json = out_dir / "labels_all.json"
         merge_cmd = [
-            "python",
+            sys.executable,
             str(Path(__file__).parent / "build_all_segmentations_labelmap.py"),
             "--reference",
             str(defaced_path),

@@ -102,7 +102,9 @@ def estimate_head_rotation(volume_node):
     import numpy as np
     arr = slicer.util.arrayFromVolume(volume_node)  # (z, y, x)
     nz = arr.shape[0]
-    z0, z1 = int(nz * 0.45), int(nz * 0.65)
+    # Use upper 70-90% of z-range to land in brain regardless of coverage
+    # (DAYLIGHT: head-only ~500 slices; SLAO: head+neck+chest ~1793 slices)
+    z0, z1 = int(nz * 0.70), int(nz * 0.90)
     slab = arr[z0:z1]
 
     angles = []
@@ -175,7 +177,7 @@ def apply_is_rotation(lm, angle_deg):
 
 import slicer
 
-perf_dir = find_and_convert_perfusion(sid)
+perf_dir = None  # perfusion not needed for thrombus annotation
 
 loaded = {}
 
@@ -222,15 +224,7 @@ def setup_views():
         sl.SetSliceOffset(brain_z)
         sl.FitSliceToAll()
 
-    # Estimate and apply IS rotation to Red (axial) view only
-    try:
-        rot_angle = estimate_head_rotation(art)
-        if abs(rot_angle) > 5.0:
-            apply_is_rotation(lm, rot_angle)
-            lm.sliceWidget("Red").sliceLogic().FitSliceToAll()
-            print(f"[ROT] Applied {rot_angle:.1f}° IS rotation to axial view")
-    except Exception as e:
-        print(f"[ROT] Failed: {e}")
+    # IS rotation disabled — let Slicer show default orientation
 
 
 import qt
@@ -240,6 +234,12 @@ try:
     slicer.util.mainWindow().moduleSelector().selectModule("CTAThrombusDemarcation")
     widget = slicer.modules.CTAThrombusDemarcationWidget
     widget.outputDirText.setText(str(THROMBUS_OUT))
+    if loaded.get("arterial"):
+        widget.ctaSelector.setCurrentNode(loaded["arterial"])
+    if loaded.get("delay1"):
+        widget.delay1Selector.setCurrentNode(loaded["delay1"])
+    if loaded.get("delay2"):
+        widget.delay2Selector.setCurrentNode(loaded["delay2"])
 except Exception as e:
     print(f"[WARN] Module not available: {e}")
 

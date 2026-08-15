@@ -128,16 +128,16 @@ def local_shell_around_mask(
 
 
 def _distance_transform_edt(mask: np.ndarray, sampling: tuple[float, float, float]) -> np.ndarray:
-    """Use SciPy EDT, with a small-array fallback for broken local environments."""
+    """Use optional CuPy/SciPy EDT, with a small-array fallback for broken local environments."""
     try:
-        from scipy import ndimage as ndi
+        from .gpu_ndimage import distance_transform_edt
 
-        return ndi.distance_transform_edt(mask, sampling=sampling)
+        return distance_transform_edt(mask, sampling=sampling)
     except Exception as exc:
         if mask.size > 250_000:
             raise ImportError(
-                "SciPy distance_transform_edt is required for production shell generation. "
-                "The current Python environment could not import SciPy correctly."
+                "SciPy or CuPy distance_transform_edt is required for production shell generation. "
+                "The current Python environment could not import a working ndimage backend."
             ) from exc
         return _brute_force_distance_to_false(mask, sampling)
 

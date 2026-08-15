@@ -441,6 +441,43 @@ PyRadiomics settings are stored in `configs/radiomics.yaml` and copied next to t
 
 Wavelet features are intentionally disabled by default. Enable them only after runtime and stability checks.
 
+### Optional fastrad backend
+
+The default radiomics backend remains `pyradiomics` for reference reproducibility. For GPU-accelerated extraction, install the optional dependencies and use the fastrad overlay:
+
+```bash
+pip install -e ".[fastrad]"
+python aorta_cta_radiomics/scripts/run_batch.py \
+  --manifest /path/to/manifest.csv \
+  --outdir /path/to/derivatives/aorta_cta_radiomics \
+  --config aorta_cta_radiomics/configs/radiomics_fastrad.yaml
+```
+
+The overlay sets:
+
+```yaml
+radiomics:
+  enabled: true
+  backend: fastrad
+  device: auto
+```
+
+Use `device: cuda` to force CUDA when available, or `device: cpu` for a CPU-only fastrad comparison. Keep a small PyRadiomics-vs-fastrad parity check before large clinical runs, especially when changing binning, resampling, or feature-class settings.
+
+For the SLAOBIDS production run, prefer the guarded two-GPU runner from the repository root. It sends ntfy progress/crash notifications, skips completed cases by sentinel outputs, waits for host RAM and VRAM, and starts a fresh child process for each case so CUDA memory is released:
+
+```bash
+micromamba run -n aorta-cta-radiomics-all python scripts/run_aorta_radiomics_parallel.py \
+  --notify fridmans-aorta-42 \
+  --config aorta_cta_radiomics/configs/radiomics_fastrad.yaml \
+  --gpus 0,1 \
+  --workers-per-gpu 1 \
+  --min-free-gb 30 \
+  --min-gpu-free-gb 4
+```
+
+Increase `--workers-per-gpu` only after watching CPU RAM, GPU memory, and per-case runtime on a small batch.
+
 ## CTA Calcium Caveats
 
 The 130 HU threshold is standard for non-contrast CT but can be confounded by contrast-enhanced CTA. The default config also runs 300, 500, and 600 HU thresholds as sensitivity analyses. Any Agatston-like output is not an ECG-gated Agatston score.

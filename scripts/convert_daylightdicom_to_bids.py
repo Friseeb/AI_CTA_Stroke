@@ -186,9 +186,9 @@ def score_series(meta: dict, n_files: int) -> int:
     return s
 
 
-def is_likely_cta_source(c: SeriesCandidate, min_files: int) -> bool:
+def is_likely_cta_source(c: SeriesCandidate, min_files: int, require_pos_keywords: bool = True) -> bool:
     txt = c.text
-    if not any(k in txt for k in POS_KEYWORDS):
+    if require_pos_keywords and not any(k in txt for k in POS_KEYWORDS):
         return False
     if any(k in txt for k in BAD_KEYWORDS):
         return False
@@ -310,6 +310,7 @@ def convert_subject(
     min_files: int,
     min_mb: float,
     max_mb: float,
+    require_pos_keywords: bool = True,
 ) -> dict:
     out_nii = out_root / f"sub-{sid}_acq-CTA_ct.nii.gz"
     out_json = out_root / f"sub-{sid}_acq-CTA_ct.json"
@@ -326,7 +327,7 @@ def convert_subject(
         }
 
     candidates = sorted(series_map.values(), key=lambda x: (x.score, x.n_files), reverse=True)
-    valid_candidates = [c for c in candidates if is_likely_cta_source(c, min_files=min_files)]
+    valid_candidates = [c for c in candidates if is_likely_cta_source(c, min_files=min_files, require_pos_keywords=require_pos_keywords)]
     if not valid_candidates:
         return {
             "subject_id": sid,
@@ -420,6 +421,16 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Optional subject id(s) to process; repeatable, e.g. --subject 631",
     )
+    p.add_argument(
+        "--no-keyword-filter",
+        action="store_true",
+        default=False,
+        help=(
+            "Disable positive-keyword requirement (cta/angi). "
+            "Selects the largest non-bad-keyword CT series. "
+            "Use when series descriptions don't contain standard CTA labels."
+        ),
+    )
     return p.parse_args()
 
 
@@ -473,6 +484,7 @@ def main() -> int:
                 min_files=args.min_files,
                 min_mb=args.min_mb,
                 max_mb=args.max_mb,
+                require_pos_keywords=not args.no_keyword_filter,
             )
         except Exception as e:
             row = {

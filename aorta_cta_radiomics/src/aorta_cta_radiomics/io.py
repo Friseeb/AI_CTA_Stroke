@@ -146,6 +146,17 @@ def write_label_like(labels: np.ndarray, reference_image: object, output_path: s
     return path
 
 
+def write_float_like(values: np.ndarray, reference_image: object, output_path: str | Path) -> Path:
+    """Write a floating-point image using the spatial metadata of a reference image."""
+    sitk = _sitk()
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    out = sitk.GetImageFromArray(values.astype(np.float32))
+    out.CopyInformation(reference_image)
+    sitk.WriteImage(out, str(path))
+    return path
+
+
 def voxel_to_physical(
     zyx: np.ndarray,
     reference_image: object | None,

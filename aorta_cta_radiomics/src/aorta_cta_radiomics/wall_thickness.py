@@ -9,6 +9,7 @@ import pandas as pd
 from scipy import ndimage as ndi
 
 from . import __version__
+from .gpu_ndimage import binary_dilation, distance_transform_edt
 
 
 @dataclass(frozen=True)
@@ -67,16 +68,16 @@ def measure_wall_thickness(
     sampling_zyx = _spacing_zyx(spacing_xyz)
     min_spacing = float(min(spacing_xyz))
     structure = ndi.generate_binary_structure(3, 1)
-    inner_surface = wall & ndi.binary_dilation(lumen, structure=structure)
-    outer_surface = wall & ndi.binary_dilation(~full_vessel, structure=structure)
+    inner_surface = wall & binary_dilation(lumen, structure=structure)
+    outer_surface = wall & binary_dilation(~full_vessel, structure=structure)
 
     if not inner_surface.any():
-        inner_surface = wall & (ndi.distance_transform_edt(~lumen, sampling=sampling_zyx) <= min_spacing * 1.5)
+        inner_surface = wall & (distance_transform_edt(~lumen, sampling=sampling_zyx) <= min_spacing * 1.5)
     if not outer_surface.any():
-        outer_surface = wall & (ndi.distance_transform_edt(full_vessel, sampling=sampling_zyx) <= min_spacing * 1.5)
+        outer_surface = wall & (distance_transform_edt(full_vessel, sampling=sampling_zyx) <= min_spacing * 1.5)
 
-    distance_to_inner = ndi.distance_transform_edt(~inner_surface, sampling=sampling_zyx)
-    distance_to_outer = ndi.distance_transform_edt(~outer_surface, sampling=sampling_zyx)
+    distance_to_inner = distance_transform_edt(~inner_surface, sampling=sampling_zyx)
+    distance_to_outer = distance_transform_edt(~outer_surface, sampling=sampling_zyx)
 
     thickness = np.zeros(lumen.shape, dtype=np.float32)
     thickness[wall] = (distance_to_inner[wall] + distance_to_outer[wall] + min_spacing).astype(np.float32)

@@ -32,9 +32,9 @@ def test_fat_closed_wall_excludes_contrast_lumen_and_fat_support():
 
     assert result.contrast_lumen_mask[:, 5:8, 5:8].all()
     assert not result.wall_candidate_mask[:, 6, 6].any()
-    assert result.wall_candidate_mask[:, 4, 4].any()
     assert result.wall_candidate_mask[:, 6, 9].any()
     assert not result.wall_candidate_mask[fat].any()
+    assert not (result.wall_candidate_mask & aorta).any()
     assert set(np.unique(result.labelmap)) >= {0, 1, 2, 3}
     assert not result.features.empty
 
@@ -60,7 +60,7 @@ def test_fat_closed_wall_handles_empty_fat_support():
 
     assert result.fat_support_mask.sum() == 0
     assert result.closed_outer_envelope_mask.any()
-    assert result.wall_candidate_mask.any()
+    assert not result.wall_candidate_mask.any()
     assert not (result.wall_candidate_mask & result.contrast_lumen_mask).any()
 
 
@@ -149,7 +149,7 @@ def test_fat_closed_wall_strict_base_lumen_excludes_low_wall_hu():
         min_lumen_hu=300.0,
     )
 
-    assert result.contrast_lumen_mask[:, 6:9, 6:9].all()
+    assert result.contrast_lumen_mask[:, 6, 6].all()
     assert not result.contrast_lumen_mask[:, 5, 5].any()
 
 
@@ -254,6 +254,7 @@ def test_fat_closed_wall_can_use_input_aorta_as_lumen_floor_and_add_contrast():
     assert not result.contrast_lumen_mask[:, 6:9, 9].any()
     assert result.wall_candidate_mask[:, 6:9, 9].all()
     assert result.contrast_lumen_mask[:, 6:9, 10].all()
+    assert not (result.wall_candidate_mask & result.contrast_lumen_mask).any()
 
 
 def test_fat_closed_wall_excludes_calcium_range_hu_from_lumen_but_keeps_wall():
@@ -263,6 +264,7 @@ def test_fat_closed_wall_excludes_calcium_range_hu_from_lumen_but_keeps_wall():
     image[aorta] = 70.0
     image[:, 6:9, 6:9] = 360.0
     image[:, 6:9, 9] = 620.0
+    image[:, 7, 7] = 620.0
 
     result = extract_fat_closed_aortic_wall(
         image=image,
@@ -284,10 +286,13 @@ def test_fat_closed_wall_excludes_calcium_range_hu_from_lumen_but_keeps_wall():
         lumen_correction_min_hu=300.0,
     )
 
-    assert result.contrast_lumen_mask[:, 6:9, 6:9].all()
+    assert result.contrast_lumen_mask[:, 6, 6].all()
+    assert not result.contrast_lumen_mask[:, 7, 7].any()
     assert not result.contrast_lumen_mask[:, 6:9, 9].any()
     assert result.wall_candidate_mask[:, 6:9, 9].all()
     assert result.hu_refined_aorta_mask[:, 6:9, 9].all()
+    assert not result.wall_candidate_mask[:, 7, 7].any()
+    assert not (result.wall_candidate_mask & result.contrast_lumen_mask).any()
 
 
 def test_fat_closed_wall_can_exclude_calcium_range_hu_from_wall_when_requested():
