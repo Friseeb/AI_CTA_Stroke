@@ -65,3 +65,7 @@ external/nv_segment_ct/vista3d_pretrained_model/model_monai1.3.pt
 # Streamlit dashboard upload staging
 app/_uploads/
 .streamlit/secrets.toml
+
+# STOPSTORM cardiac valve nnU-Net (Zenodo 13752275): weights are local only, see external/stopstorm/README.md
+external/stopstorm/*
+!external/stopstorm/README.md
