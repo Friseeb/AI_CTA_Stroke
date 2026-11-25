@@ -99,6 +99,18 @@ python <PROJECT_ROOT>/scripts/run_nv_segment_ct_laa.py \
   --output <BIDS_ROOT>/derivatives/nv_segment_ct_laa/<CASE_ID>_laa108.nii.gz
 ```
 
+### Whole-heart labelmap (HolOrama, 14 structures incl. LAA and epicardial / pericardial fat)
+
+```bash
+python <PROJECT_ROOT>/subprojects/heart_segmentation/fetch_holorama_weights.py   # once, 21 MB (MIT)
+python <PROJECT_ROOT>/subprojects/heart_segmentation/run_heart_segmentation_case.py \
+  --cta <BIDS_ROOT>/derivatives/defaced/<CASE_ID>_defaced.nii.gz \
+  --out-root <BIDS_ROOT>/derivatives/heart_segmentation
+```
+
+CPU-only is fine (onnxruntime, ~3-5 min per case after a TotalSegmentator heart crop). Details, label
+table and limitations: `subprojects/heart_segmentation/README.md`.
+
 ### Shape pipeline
 
 1. Mesh extraction: `scripts/run_laa_shape_descriptors.py`

@@ -69,3 +69,7 @@ app/_uploads/
 # STOPSTORM cardiac valve nnU-Net (Zenodo 13752275): weights are local only, see external/stopstorm/README.md
 external/stopstorm/*
 !external/stopstorm/README.md
+
+# HolOrama whole-heart CT model (MIT, ~21 MB): fetched by subprojects/heart_segmentation/fetch_holorama_weights.py
+external/holorama/*
+!external/holorama/README.md

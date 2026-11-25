@@ -4,7 +4,8 @@ This subproject is for automatic deep-learning segmentations.
 
 ## ROI Tracks
 
-- `heart`: LA/LAA, aorta, cardiac structures
+- `heart`: LA/LAA, aorta, cardiac structures (TotalSegmentator `heartchambers_highres`, NUDF / VISTA3D LAA,
+  and the HolOrama 14-structure whole-heart model in `subprojects/heart_segmentation/`)
 - `cervical`: carotids, vertebral arteries, neck vessels
 - `intracranial`: Circle of Willis and intracranial arteries
 
@@ -26,6 +27,8 @@ not raw CTA directly.
 - TopCoW-only: `scripts/run_topcow_claim.py`
 - NUDF LAA-only: `scripts/run_cardiac_ct_explorer_nudf_only.py`
 - NV LAA-only: `scripts/run_nv_segment_ct_laa.py`
+- Whole heart, 14 labels incl. LAA + epicardial / pericardial fat (HolOrama, onnxruntime, CPU ok):
+  `subprojects/heart_segmentation/run_heart_segmentation_case.py` / `..._batch.py`
 
 ## Configs
 

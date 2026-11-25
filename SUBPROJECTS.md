@@ -14,6 +14,7 @@ Primary workflow documentation lives in `README.md`.
 - `aorta_cta_radiomics`: `aorta_cta_radiomics/`
 - `cta-dental-opportunistic-screening`: `subprojects/cta-dental-opportunistic-screening/` — opportunistic dental analysis from head/neck CTA
 - `stroke-cta-osa`: `subprojects/stroke-cta-osa/` — CTA-derived airway / cervical-adiposity features for OSA & nocturnal vascular-risk phenotyping in stroke cohorts (see `docs/stroke_cta_osa/`)
+- `heart_segmentation`: `subprojects/heart_segmentation/` — whole-heart 14-structure labelmap (chambers, LAA, great vessels, coronaries, epicardial / pericardial fat) with the HolOrama CT model on onnxruntime; crops to a TotalSegmentator heart mask
 
 ## Design Rules
 

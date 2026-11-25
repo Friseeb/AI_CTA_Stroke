@@ -2,16 +2,37 @@ roi_group: heart
 labels:
   left_atrium:
     id: 8
-    sources: [totalseg_heartchambers_highres]
+    sources: [totalseg_heartchambers_highres, holorama_heart]
   left_atrial_appendage:
     ids: [9, 10, 11]
-    sources: [totalseg_total, nv_segment_ct, nudf]
+    sources: [totalseg_total, nv_segment_ct, nudf, holorama_heart]
   aorta:
     ids: [1, 12]
-    sources: [totalseg_total, nv_segment_ct]
+    sources: [totalseg_total, nv_segment_ct, holorama_heart]
 analysis_defaults:
   radiomics: true
   shape: true
   calcium_score: true
   atheroburden: true
   tortuosity: false
+# HolOrama whole-heart CT model (subprojects/heart_segmentation): one labelmap per case,
+# <case>_holorama_heart_seg.nii.gz, with these values (holorama_labels.py is the authority)
+sources:
+  holorama_heart:
+    labelmap: "{case_id}_holorama_heart_seg.nii.gz"
+    structures_dir: structures
+    values:
+      coronary_arteries: 1
+      lv_myocardium: 2
+      left_atrium: 3            # appendage excluded (TotalSegmentator's heart_atrium_left includes it)
+      left_ventricle: 4
+      right_atrium: 5
+      right_ventricle: 6
+      aorta: 7
+      pulmonary_arteries: 8
+      pericardial_fat: 9        # outside the pericardium ("Precardial Fat" in the model's config.json)
+      epicardial_fat: 10
+      pulmonary_veins: 11
+      superior_vena_cava: 12
+      inferior_vena_cava: 13
+      left_atrial_appendage: 14
